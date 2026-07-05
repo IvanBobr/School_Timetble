@@ -12,22 +12,21 @@ class App:
         self.root.title("📋 Школьное расписание")
         self.root.configure(bg='black')
 
-        # Стиль для имитации аэропортного дисплея
-        self.bg_color = '#000033'  # Тёмно-синий фон
-        self.text_color = '#00FFFF'  # Голубой текст
-        self.highlight_color = '#FFFF00'  # Жёлтый для выделения
-        self.warning_color = '#FF3300'  # Красный для важных изменений
-        self.cancelled_bg = '#DC143C'  # Тёмно-красный фон для отменённых
-        self.cancelled_fg = '#FFFFFF'  # Белый текст для отменённых
+        self.bg_color = '#000033'
+        self.text_color = '#00FFFF'
+        self.highlight_color = '#FFFF00'
+        self.warning_color = '#FF3300'
+        self.cancelled_bg = '#DC143C'
+        self.cancelled_fg = '#FFFFFF'
 
-        # УВЕЛИЧЕННЫЕ шрифты для полноэкранного режима
+        # Шрифты
         self.title_font = font.Font(family="Courier", size=36, weight="bold")
         self.header_font = font.Font(family="Courier", size=24, weight="bold")
         self.data_font = font.Font(family="Courier", size=18)
         self.small_font = font.Font(family="Courier", size=14)
         self.button_font = font.Font(family="Courier", size=16, weight="bold")
 
-        # Время уроков (начало, конец) - 8 уроков
+        # Время уроков
         self.lesson_times = [
             ("08:30", "09:15"),
             ("09:30", "10:15"),
@@ -42,34 +41,48 @@ class App:
         # Дни недели
         self.days_of_week = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"]
         weekday_index = datetime.now().weekday()
-        self.day_today = self.days_of_week[weekday_index%6]
-        
+        self.day_today = self.days_of_week[weekday_index % 6]
+
         self.data = download_fromServer.fetch_schedule()
+
+        if self.data is not None:
+            download_fromServer.save_schedule_to_cache(self.data)
+        else:
+            print("Server unavailable, trying to load cached data...")
+            self.data = download_fromServer.load_schedule_from_cache()
+            if self.data is None:
+                self.data = {
+                    "fromExcel": {
+                        "sp_classes": [],
+                        "sp_rooms": [],
+                        "sp_subjects": [],
+                        "schedule": {}
+                    },
+                    "fromWord": {
+                        "replace": [],
+                        "skip": [],
+                        "day": ""
+                    }
+                }
+                print("No cached data available, using empty schedule")
+
+
         self.rasp_wth_changes = self.make_rasp_wth_changes()
 
-        # Получаем список всех классов
         self.all_classes = sorted(self.data["fromExcel"]["sp_classes"], key=lambda x: (int(x.split('-')[0]), int(x.split('-')[1])))
 
-        # Группы классов для постраничного просмотра (5-е, 6-е и т.д.)
         self.class_groups = self.create_class_groups()
         self.current_group_index = 0
-        self.current_day_index = 0  # Для навигации по дням в полном расписании
+        self.current_day_index = 0
 
-        # Флаги для переключения режимов
         self.show_all_lessons = True
         self.current_class = None
 
-        # Инициализируем clock_job для предотвращения ошибок
         self.clock_job = None
 
-        # Настройка окна
         self.setup_window()
-
-        # Показать главное окно
         self.show_all_classes_schedule()
-
-        self.root.mainloop()
-        
+        self.root.mainloop()   
 
     def create_class_groups(self):
         """Создание групп классов для постраничного просмотра"""
@@ -119,32 +132,46 @@ class App:
         return date(year, month, day)
 
     def make_rasp_wth_changes(self):
+        # Проверяем, что данные вообще есть и содержат нужные ключи
+        if (not self.data or 
+            "fromExcel" not in self.data or 
+            "schedule" not in self.data["fromExcel"] or
+            "fromWord" not in self.data):
+            return {}
+
         data_return = self.data["fromExcel"]["schedule"]
-        # print(data_return)
-        
         date_changes = self.parse_day_month(self.data["fromWord"]["day"])
         today = date.today()
         
-        print(date_changes, today)
-        if date_changes == today:    
+        print(f"Date from changes: {date_changes}, today: {today}")
+        
+        # Применяем изменения только если дата совпадает
+        if date_changes == today:
             data_replace = self.data["fromWord"]["replace"]
             data_skip = self.data["fromWord"]["skip"]
-            print("data_replace: ", data_replace, "\ndata_skip: ", data_skip)
+            print("Applying changes...")
             
             for change in data_replace:
                 class_torepl = change[3]
                 num_torepl = change[0]
-                if num_torepl - 1 < len(data_return[self.day_today][class_torepl]):
-                    data_return[self.day_today][class_torepl][num_torepl-1] = change
-                else:
-                    data_return[self.day_today][class_torepl].append(change)
+                # Проверяем, что класс и номер урока существуют
+                if (self.day_today in data_return and 
+                    class_torepl in data_return[self.day_today]):
+                    if num_torepl - 1 < len(data_return[self.day_today][class_torepl]):
+                        data_return[self.day_today][class_torepl][num_torepl-1] = change
+                    else:
+                        data_return[self.day_today][class_torepl].append(change)
             for change in data_skip:
                 class_torepl = change[0]
                 num_torepl = change[1]
-                data_return[self.day_today][class_torepl][num_torepl-1][2] = '-'
-                data_return[self.day_today][class_torepl][num_torepl-1][4] = '-'
-                data_return[self.day_today][class_torepl][num_torepl-1][5] = '-'
-                data_return[self.day_today][class_torepl][num_torepl-1][6] = 'ОТМЕНЕНО'
+                if (self.day_today in data_return and 
+                    class_torepl in data_return[self.day_today] and
+                    num_torepl - 1 < len(data_return[self.day_today][class_torepl])):
+                    data_return[self.day_today][class_torepl][num_torepl-1][2] = '-'
+                    data_return[self.day_today][class_torepl][num_torepl-1][4] = '-'
+                    data_return[self.day_today][class_torepl][num_torepl-1][5] = '-'
+                    data_return[self.day_today][class_torepl][num_torepl-1][6] = 'ОТМЕНЕНО'
+        
         return data_return
 
     def setup_window(self):
@@ -356,16 +383,22 @@ class App:
         self.create_header("✈ ТЕКУЩИЕ УРОКИ - ВСЕ КЛАССЫ ✈")
         self.create_status_bar("Информационная система школьного расписания")
 
+        # Проверка наличия данных
+        if not self.rasp_wth_changes:
+            self.create_status_bar("Нет данных для отображения (проверьте подключение к серверу)")
+            self.create_navigation_buttons([("ВЫХОД", self.root.quit)])
+            return
 
-        current_lesson, next_lesson, is_break = self.get_current_lesson_info()
-        lesson_to_show = current_lesson if current_lesson is not None else next_lesson
         current_day = self.day_today
-
-        day_schedule = self.rasp_wth_changes[self.day_today]
-        if day_schedule is None:
+        if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
             self.create_navigation_buttons([("ВЫБОР КЛАССА", self.show_class_selection)])
             return
+
+        day_schedule = self.rasp_wth_changes[current_day]
+
+        current_lesson, next_lesson, is_break = self.get_current_lesson_info()
+        lesson_to_show = current_lesson if current_lesson is not None else next_lesson
 
         container = tk.Frame(self.root, bg=self.bg_color)
         container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
@@ -392,7 +425,7 @@ class App:
 
         row_idx = 1
         for class_name in self.all_classes:
-            if class_name in day_schedule.keys():
+            if class_name in day_schedule:
                 lessons = day_schedule[class_name]
                 if lesson_to_show is not None and lesson_to_show < len(lessons):
                     lesson_data = lessons[lesson_to_show]
@@ -404,7 +437,7 @@ class App:
                         lesson_data[4],   # кабинет
                         lesson_data[6]    # статус
                     )
-                    
+
                     is_cancelled = lesson_data[6] == "ОТМЕНЕНО"
                     for col_idx, cell_data in enumerate(full_row_data):
                         if is_cancelled:
@@ -428,11 +461,7 @@ class App:
                                             pady=12)
                         cell_label.grid(row=row_idx, column=col_idx, sticky='ew')
                     row_idx += 1
-                else:
-                    
-                    pass
 
-        
         status_text = ""
         if current_lesson is not None:
             start_time, end_time = self.lesson_times[current_lesson]
@@ -465,6 +494,12 @@ class App:
         # Создаем заголовок
         self.create_header(f"✈ РАСПИСАНИЕ КЛАССА {class_name} ✈")
 
+        if not self.rasp_wth_changes or self.day_today not in self.rasp_wth_changes:
+            self.create_status_bar("Нет данных для отображения")
+            self.create_navigation_buttons([("НАЗАД", self.show_all_classes_schedule)])
+            return
+        rasp = self.rasp_wth_changes[self.day_today]
+
         # Создаем информационную строку
         self.create_status_bar(f"Расписание класса {class_name} на текущий день")
 
@@ -484,7 +519,6 @@ class App:
                                     padx=20,
                                     pady=15)
             header_label.grid(row=0, column=i, sticky='ew')
-
         # Фильтруем уроки в зависимости от режима
         rasp = self.rasp_wth_changes[self.day_today]
         schedule_to_show = []
@@ -728,12 +762,25 @@ class App:
         if self.current_group_index >= len(self.class_groups):
             self.current_group_index = 0
 
+        # Проверка наличия данных
+        if not self.rasp_wth_changes:
+            self.create_status_bar("Нет данных для отображения")
+            self.create_navigation_buttons([("ВЫХОД", self.root.quit)])
+            return
+
         # Создаем заголовок
         current_group = self.class_groups[self.current_group_index]
         current_day = self.days_of_week[self.current_day_index]
-        self.create_header(f"✈ РАСПИСАНИЕ - {current_day} ✈")
 
-        # Создаем информационную строку
+        # Проверяем, есть ли расписание на этот день
+        if current_day not in self.rasp_wth_changes:
+            self.create_status_bar(f"Нет расписания на {current_day}")
+            self.create_navigation_buttons([("НАЗАД", self.show_all_classes_schedule)])
+            return
+
+        day_schedule = self.rasp_wth_changes[current_day]
+
+        self.create_header(f"✈ РАСПИСАНИЕ - {current_day} ✈")
         self.create_status_bar(f"{current_day} | {current_group['name']}")
 
         # Кнопки навигации по дням
@@ -742,19 +789,22 @@ class App:
         # Кнопки навигации по группам классов
         self.create_group_navigation_buttons()
 
-        # Основная таблица - ГОРИЗОНТАЛЬНАЯ (без вертикальной прокрутки)
-        # Столбцы: класс, урок 1, урок 2, ..., урок 8
+        # Основная таблица
         table_frame = tk.Frame(self.root, bg=self.bg_color)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
 
         # Заголовки таблицы
-        
         max_lessons = 0
         for class_name in current_group['classes']:
-            if class_name in self.data["fromExcel"]["schedule"][current_day].keys():
-                max_lessons = max(max_lessons, len(self.data["fromExcel"]["schedule"][current_day][class_name]))
-                
-        headers = ["КЛАСС"] + [f"УРОК {i}" for i in range(1, max_lessons+1)]
+            if class_name in day_schedule:
+                max_lessons = max(max_lessons, len(day_schedule[class_name]))
+
+        if max_lessons == 0:
+            self.create_status_bar("Нет уроков для отображения")
+            self.create_navigation_buttons([("НАЗАД", self.show_all_classes_schedule)])
+            return
+
+        headers = ["КЛАСС"] + [f"УРОК {i}" for i in range(1, max_lessons + 1)]
 
         for i, header in enumerate(headers):
             header_label = tk.Label(table_frame,
@@ -769,15 +819,13 @@ class App:
             header_label.grid(row=0, column=i, sticky='nsew')
 
         row_idx = 1
-
         for class_name in current_group['classes']:
-            if class_name in self.data["fromExcel"]["schedule"][current_day].keys():
-                
+            if class_name in day_schedule:
                 row_data = [class_name]
-                
-                for lesson_num in range(1, max_lessons+1):
-                    rasp_cur_class = self.data["fromExcel"]["schedule"][current_day][class_name]
-                    if (lesson_num-1) < len(rasp_cur_class):
+                rasp_cur_class = day_schedule[class_name]
+
+                for lesson_num in range(1, max_lessons + 1):
+                    if (lesson_num - 1) < len(rasp_cur_class):
                         lesson_info = f"{rasp_cur_class[lesson_num-1][2]}\n{rasp_cur_class[lesson_num-1][4]}"
                     else:
                         lesson_info = ""
@@ -785,10 +833,7 @@ class App:
 
                 # Отображаем строку
                 for col_idx, cell_data in enumerate(row_data):
-                    # Определяем цвет фона для чередования строк
                     bg_color = self.bg_color if row_idx % 2 == 0 else '#001144'
-
-                    # Для заголовка класса особый цвет
                     if col_idx == 0:
                         bg_color = '#002255'
                         fg_color = self.text_color
@@ -796,17 +841,16 @@ class App:
                         fg_color = '#FFFFFF'
 
                     cell_label = tk.Label(table_frame,
-                                          text=cell_data,
-                                          font=self.data_font,
-                                          fg=fg_color,
-                                          bg=bg_color,
-                                          padx=15,
-                                          pady=10,
-                                          borderwidth=1,
-                                          relief="solid",
-                                          justify="center")
+                                        text=cell_data,
+                                        font=self.data_font,
+                                        fg=fg_color,
+                                        bg=bg_color,
+                                        padx=15,
+                                        pady=10,
+                                        borderwidth=1,
+                                        relief="solid",
+                                        justify="center")
                     cell_label.grid(row=row_idx, column=col_idx, sticky='nsew')
-
                 row_idx += 1
 
         # Информационная строка
@@ -823,11 +867,10 @@ class App:
         ]
         self.create_navigation_buttons(buttons)
 
-        # Настраиваем вес колонок для равномерного распределения
+        # Настраиваем вес колонок
         for i in range(len(headers)):
             table_frame.columnconfigure(i, weight=1)
 
-        # Настраиваем вес строк
         for i in range(row_idx):
             table_frame.rowconfigure(i, weight=1)
 
@@ -844,10 +887,19 @@ class App:
             self.show_full_schedule()
 
     def refresh_all_classes(self):
-        """Обновить расписание для всех классов"""
         print("Обновление общего расписания...")
+        new_data = download_fromServer.fetch_schedule()
+        if new_data is not None:
+            self.data = new_data
+            download_fromServer.save_schedule_to_cache(new_data)
+            self.rasp_wth_changes = self.make_rasp_wth_changes()
+            self.all_classes = sorted(self.data["fromExcel"]["sp_classes"], 
+                                    key=lambda x: (int(x.split('-')[0]), int(x.split('-')[1])))
+            self.class_groups = self.create_class_groups()
+        else:
+            print("Сервер недоступен, данные не обновлены")
         self.show_all_classes_schedule()
-
+        
     def refresh_class_schedule(self):
         """Обновить расписание для текущего класса"""
         print(f"Обновление расписания для класса {self.current_class}...")
