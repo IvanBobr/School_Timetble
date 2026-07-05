@@ -1,0 +1,127 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # запускается при пуше тега, начинающегося с v (например, v1.0.0)
+
+jobs:
+  # ---------- СБОРКА ПОД LINUX ----------
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Linux Client
+        run: |
+          pyinstaller --onefile --windowed --name "TimetableClient" \
+            --collect-all requests \
+            --hidden-import charset_normalizer \
+            --hidden-import idna \
+            --hidden-import urllib3 \
+            --hidden-import certifi \
+            code/timetable.py
+
+      - name: Build Linux Server
+        run: |
+          pyinstaller --onefile --name "TimetableServer" \
+            --collect-all flask \
+            --collect-all pandas \
+            --collect-all openpyxl \
+            --collect-all lxml \
+            --collect-all python_docx \
+            --collect-all requests \
+            code/server.py
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-builds
+          path: dist/
+
+  # ---------- СБОРКА ПОД WINDOWS ----------
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Windows Client
+        run: |
+          pyinstaller --onefile --windowed --name "TimetableClient" `
+            --collect-all requests `
+            --hidden-import charset_normalizer `
+            --hidden-import idna `
+            --hidden-import urllib3 `
+            --hidden-import certifi `
+            code/timetable.py
+
+      - name: Build Windows Server
+        run: |
+          pyinstaller --onefile --name "TimetableServer" `
+            --collect-all flask `
+            --collect-all pandas `
+            --collect-all openpyxl `
+            --collect-all lxml `
+            --collect-all python_docx `
+            --collect-all requests `
+            code/server.py
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-builds
+          path: dist/
+
+  # ---------- ПУБЛИКАЦИЯ В РЕЛИЗ ----------
+  release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: linux-builds
+          path: linux-builds
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: windows-builds
+          path: windows-builds
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            linux-builds/TimetableClient
+            linux-builds/TimetableServer
+            windows-builds/TimetableClient.exe
+            windows-builds/TimetableServer.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
