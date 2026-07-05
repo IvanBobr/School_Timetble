@@ -1,0 +1,36 @@
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# Сборки PyInstaller
+build/
+dist/
+*.spec
+
+# Кэш Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Файлы IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи и временные файлы
+*.log
+*.tmp
+
+# Конфиденциальные данные
+*.xls
+*.docx
+*.db
+*.sqlite3
+
+# Папки с загрузками (если они не должны быть в репозитории)
+downloads/
+files/
+uploads/
