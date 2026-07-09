@@ -1,6 +1,6 @@
 # 📋 Школьное расписание
 
-[![Версия](https://img.shields.io/badge/версия-1.1.0-blue)]()
+[![Версия](https://img.shields.io/badge/версия-1.3.1-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 
 ## 📖 Описание
