@@ -118,6 +118,8 @@ class App:
         return sorted_groups
 
     def parse_day_month(self, date_str):
+        if not date_str or " " not in date_str:
+            return None   # или вернуть None, чтобы затем не применять изменения
         month_map = {
             'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4,
             'мая': 5, 'июня': 6, 'июля': 7, 'августа': 8,
@@ -132,46 +134,54 @@ class App:
         return date(year, month, day)
 
     def make_rasp_wth_changes(self):
-        # Проверяем, что данные вообще есть и содержат нужные ключи
-        if (not self.data or 
-            "fromExcel" not in self.data or 
+        # Проверка наличия данных
+        if (not self.data or
+            "fromExcel" not in self.data or
             "schedule" not in self.data["fromExcel"] or
             "fromWord" not in self.data):
             return {}
 
         data_return = self.data["fromExcel"]["schedule"]
-        date_changes = self.parse_day_month(self.data["fromWord"]["day"])
+        day_str = self.data["fromWord"].get("day", "")
+
+        # Если дата не указана или не парсится – не применяем изменения
+        if not day_str or " " not in day_str:
+            return data_return
+
+        date_changes = self.parse_day_month(day_str)
+        if date_changes is None:
+            return data_return
+
         today = date.today()
-        
         print(f"Date from changes: {date_changes}, today: {today}")
-        
+
         # Применяем изменения только если дата совпадает
         if date_changes == today:
             data_replace = self.data["fromWord"]["replace"]
             data_skip = self.data["fromWord"]["skip"]
             print("Applying changes...")
-            
+
             for change in data_replace:
                 class_torepl = change[3]
                 num_torepl = change[0]
-                # Проверяем, что класс и номер урока существуют
-                if (self.day_today in data_return and 
+                if (self.day_today in data_return and
                     class_torepl in data_return[self.day_today]):
                     if num_torepl - 1 < len(data_return[self.day_today][class_torepl]):
-                        data_return[self.day_today][class_torepl][num_torepl-1] = change
+                        data_return[self.day_today][class_torepl][num_torepl - 1] = change
                     else:
                         data_return[self.day_today][class_torepl].append(change)
+
             for change in data_skip:
                 class_torepl = change[0]
                 num_torepl = change[1]
-                if (self.day_today in data_return and 
+                if (self.day_today in data_return and
                     class_torepl in data_return[self.day_today] and
                     num_torepl - 1 < len(data_return[self.day_today][class_torepl])):
-                    data_return[self.day_today][class_torepl][num_torepl-1][2] = '-'
-                    data_return[self.day_today][class_torepl][num_torepl-1][4] = '-'
-                    data_return[self.day_today][class_torepl][num_torepl-1][5] = '-'
-                    data_return[self.day_today][class_torepl][num_torepl-1][6] = 'ОТМЕНЕНО'
-        
+                    data_return[self.day_today][class_torepl][num_torepl - 1][2] = '-'
+                    data_return[self.day_today][class_torepl][num_torepl - 1][4] = '-'
+                    data_return[self.day_today][class_torepl][num_torepl - 1][5] = '-'
+                    data_return[self.day_today][class_torepl][num_torepl - 1][6] = 'ОТМЕНЕНО'
+
         return data_return
 
     def setup_window(self):
