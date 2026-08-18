@@ -31,10 +31,11 @@ CURRENT_SCHEDULE = None
 
 @app.route('/api/schedule')
 def get_schedule():
-    global CURRENT_SCHEDULE
-    data = data_to_jsonFile.make_jsonFile()
-    print("made from json: ", data)
-    return jsonify(data)  # Flask автоматически сериализует словарь в JSON
+    try:
+        data = data_to_jsonFile.make_jsonFile()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify(data)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

@@ -80,31 +80,6 @@ class Excel:
         bool_inday = False
         rasp_today = []
         for index, row in self.df.iterrows():
-            day_name = row["Unnamed: 0"]
-            if isinstance(day_name, str) and day_name.upper() == day.upper():
-                bool_inday = True
-            elif isinstance(day_name, str) and day_name.upper() != day.upper() and bool_inday:
-                bool_inday = False
-                break
-            if bool_inday:
-                num_class_kab = self.cols.index(grade)
-                if str(row[self.cols[num_class_kab]]) != "nan":
-                    rasp_today.append([
-                        str(row[self.cols[1]]),  # № урока
-                        self.time_lesson[int(row[self.cols[1]]) - 1][0], # время начала урока
-                        row[self.cols[num_class_kab]],  # урок
-                        grade,  # класс
-                        (str(row[self.cols[num_class_kab + 1]]) + '/' + str(row[self.cols[num_class_kab + 2]])).replace("А", "") if str(
-                            row[self.cols[num_class_kab + 2]]) != "nan" else str(row[self.cols[num_class_kab + 1]]).replace("А", ""), # кабинет
-                        "-",  # учитель
-                        "ПО РАСПИСАНИЮ"  # статус
-                    ])
-        return rasp_today
-
-    def make_rasp_by_dayclass(self, day, grade):
-        bool_inday = False
-        rasp_today = []
-        for index, row in self.df.iterrows():
             cell_value = row["Unnamed: 0"]
             if isinstance(cell_value, str) and cell_value.upper() == day.upper():
                 bool_inday = True

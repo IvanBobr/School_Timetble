@@ -4,7 +4,12 @@ from parsing_word import *
 import pprint
 
 def make_jsonFile():    
-    doc_Word = Word(name="../downloads/changes.docx")
+    try:
+        doc_Word = Word(name="../downloads/changes.docx")
+    except Exception as e:
+        print(f"Error reading changes.docx: {e}")
+        return {"fromWord": {"replace": [], "skip": [], "day": ""}, "fromExcel": {...}}
+    
     doc_Word.make_sp_skip()
     doc_Word.make_sp_repl()
 
@@ -12,7 +17,11 @@ def make_jsonFile():
     # print("\n список пропущенных: \n", doc_Word.sp_skip)
     # print("\n список замененных: \n", doc_Word.sp_repl)
 
-    doc_Xls = parsing_excel.Excel(name="../downloads/rasp.xls")
+    try:
+        doc_Xls = parsing_excel.Excel(name="../downloads/rasp.xls")
+    except Exception as e:
+        print(f"Error reading rasp.xls: {e}")
+        return {"fromWord": {"replace": [], "skip": [], "day": ""}, "fromExcel": {...}}
     doc_Xls.make_sp_classes()
     doc_Xls.load_rooms()
     doc_Xls.load_subjects()
@@ -26,9 +35,6 @@ def make_jsonFile():
         for class_name in excel_classes:
                     data_return["fromExcel"]["schedule"][day][class_name] = doc_Xls.make_rasp_by_dayclass(day, class_name)
 
-    # json_data = json.dumps(data_return)
-    # with open("../downloads/dson_data.txt", "w") as f:
-    #     f.write(json_data)
 
     print('\n\n', data_return.keys(), '\n', data_return["fromWord"].keys(), '\n', data_return["fromExcel"].keys())
     print('\n', data_return["fromExcel"]["sp_classes"])

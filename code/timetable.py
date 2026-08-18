@@ -12,6 +12,9 @@ class App:
         self.root.title("📋 Школьное расписание")
         self.root.configure(bg='black')
 
+        self._last_lesson_index = None
+        self._last_next_index = None
+
         self.bg_color = '#000033'
         self.text_color = '#00FFFF'
         self.highlight_color = '#FFFF00'
@@ -80,7 +83,11 @@ class App:
 
         self.clock_job = None
 
+        self.idle_timer_id = None
+        self.is_main_screen = False
+
         self.setup_window()
+        self.setup_idle_timer()
         self.show_all_classes_schedule()
         self.root.mainloop()   
 
@@ -125,6 +132,9 @@ class App:
             'мая': 5, 'июня': 6, 'июля': 7, 'августа': 8,
             'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
         }
+
+        if not date_str or " " not in date_str:
+            return None
         
         day_str, month_str = date_str.split()
         day = int(day_str)
@@ -347,15 +357,18 @@ class App:
         self.show_full_schedule()
 
     def update_clock(self):
-        """Обновление времени"""
         try:
             current_time = datetime.now().strftime("%H:%M:%S")
             if hasattr(self, 'clock_label') and self.clock_label.winfo_exists():
                 self.clock_label.config(text=current_time)
-                # Планируем следующее обновление
+                # Проверяем, не сменился ли урок
+                new_current, new_next, _ = self.get_current_lesson_info()
+                if new_current != self._last_lesson_index or new_next != self._last_next_index:
+                    self._last_lesson_index = new_current
+                    self._last_next_index = new_next
+                    self.show_all_classes_schedule()  # или refresh_all_classes()
                 self.clock_job = self.root.after(1000, self.update_clock)
-        except Exception as e:
-            # Если произошла ошибка (виджет уничтожен), не планируем следующее обновление
+        except:
             pass
 
     def get_current_lesson_info(self):
@@ -389,6 +402,8 @@ class App:
 
 
     def show_all_classes_schedule(self):
+        self.is_main_screen = True
+        self.reset_idle_timer()
         self.clear_window()
         self.create_header("✈ ТЕКУЩИЕ УРОКИ - ВСЕ КЛАССЫ ✈")
         self.create_status_bar("Информационная система школьного расписания")
@@ -498,6 +513,7 @@ class App:
 
     def show_class_schedule(self, class_name):
         """Показать расписание для конкретного класса"""
+        self.is_main_screen = False
         self.clear_window()
         self.current_class = class_name
 
@@ -587,6 +603,8 @@ class App:
                                           pady=12)
                     cell_label.grid(row=row_idx, column=col_idx, sticky='ew')
 
+        self.reset_idle_timer()
+
         # Информационная строка
         mode_text = "ВСЕ УРОКИ" if self.show_all_lessons else "ТОЛЬКО БУДУЩИЕ"
         self.create_footer(f"Класс: {class_name} | Режим: {mode_text} | Уроков: {len(schedule_to_show)}")
@@ -608,6 +626,7 @@ class App:
 
 
     def show_class_selection(self):
+        self.is_main_screen = False
         """Окно выбора класса с крупными элементами и параллелями в 2 колонки"""
         self.clear_window()
 
@@ -712,6 +731,8 @@ class App:
         ]
         self.create_navigation_buttons(buttons)
 
+        self.reset_idle_timer()
+
 
     def on_grade_selected(self, group):
         """Обновляет правую панель: классы выбранной параллели в 4 колонки"""
@@ -759,6 +780,7 @@ class App:
 
 
     def show_full_schedule(self):
+        self.is_main_screen = False
         """Показать полное расписание для всех классов"""
         self.clear_window()
 
@@ -884,6 +906,8 @@ class App:
         for i in range(row_idx):
             table_frame.rowconfigure(i, weight=1)
 
+        self.reset_idle_timer()
+
     def prev_group(self):
         """Перейти к предыдущей группе классов"""
         if self.current_group_index > 0:
@@ -921,6 +945,30 @@ class App:
         self.show_all_lessons = not self.show_all_lessons
         if self.current_class:
             self.show_class_schedule(self.current_class)
+
+    def setup_idle_timer(self):
+        """Настройка таймера бездействия."""
+        # Привязываем события, сбрасывающие таймер (любое действие пользователя)
+        self.root.bind_all('<Key>', self.reset_idle_timer)
+        self.root.bind_all('<Button>', self.reset_idle_timer)
+        self.root.bind_all('<Motion>', self.reset_idle_timer)
+        self.root.bind_all('<Enter>', self.reset_idle_timer)
+        self.root.bind_all('<FocusIn>', self.reset_idle_timer)
+        self.reset_idle_timer()  # запускаем таймер сразу
+
+    def reset_idle_timer(self, event=None):
+        """Сброс таймера бездействия."""
+        if self.idle_timer_id:
+            self.root.after_cancel(self.idle_timer_id)
+            self.idle_timer_id = None
+        # Запускаем новый таймер на 10 минут (600000 мс)
+        self.idle_timer_id = self.root.after(300000, self.on_idle_timeout)
+
+    def on_idle_timeout(self):
+        """Действие при бездействии 10 минут."""
+        self.idle_timer_id = None
+        if not self.is_main_screen:
+            self.show_all_classes_schedule()
 
 
 if __name__ == "__main__":
