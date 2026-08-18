@@ -127,14 +127,12 @@ class App:
     def parse_day_month(self, date_str):
         if not date_str or " " not in date_str:
             return None   # или вернуть None, чтобы затем не применять изменения
+
         month_map = {
             'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4,
             'мая': 5, 'июня': 6, 'июля': 7, 'августа': 8,
             'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
         }
-
-        if not date_str or " " not in date_str:
-            return None
         
         day_str, month_str = date_str.split()
         day = int(day_str)

@@ -1,7 +1,8 @@
 import requests
 import json
 import os
-
+import configparser
+import os
 
 def save_schedule_to_cache(data):
     try:
@@ -23,9 +24,6 @@ def load_schedule_from_cache():
     except Exception as e:
         print(f"Error loading cache: {e}")
         return None
-
-import configparser
-import os
 
 def get_server_ips_from_config():
     """Возвращает список IP-адресов из config.ini"""
