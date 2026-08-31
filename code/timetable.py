@@ -33,18 +33,21 @@ class App:
         self.lesson_times = [
             ("08:30", "09:15"),
             ("09:30", "10:15"),
-            ("10:45", "11:30"),
-            ("11:45", "12:30"),
+            ("10:35", "11:20"),
+            ("11:40", "12:25"),
             ("12:45", "13:30"),
-            ("13:45", "14:30"),
-            ("14:45", "15:30"),
-            ("15:45", "16:30")
+            ("13:50", "14:35"),
+            ("14:55", "15:40"),
+            ("15:50", "16:35")
         ]
 
         # Дни недели
         self.days_of_week = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"]
         weekday_index = datetime.now().weekday()
         self.day_today = self.days_of_week[weekday_index % 6]
+
+         # --- Устанавливаем начальные значения для сравнения в update_clock ---
+        self._last_lesson_index, self._last_next_index, _ = self.get_current_lesson_info()
 
         self.data = download_fromServer.fetch_schedule()
 
@@ -89,6 +92,8 @@ class App:
         self.setup_window()
         self.setup_idle_timer()
         self.show_all_classes_schedule()
+        # Запоминаем текущий урок, чтобы избежать лишней перерисовки через секунду
+        # self._last_lesson_index, self._last_next_index, _ = self.get_current_lesson_info()
         self.root.mainloop()   
 
     def create_class_groups(self):
@@ -359,16 +364,17 @@ class App:
             current_time = datetime.now().strftime("%H:%M:%S")
             if hasattr(self, 'clock_label') and self.clock_label.winfo_exists():
                 self.clock_label.config(text=current_time)
-                # Проверяем, не сменился ли урок
                 new_current, new_next, _ = self.get_current_lesson_info()
-                if new_current != self._last_lesson_index or new_next != self._last_next_index:
+                if self._last_lesson_index is None:
                     self._last_lesson_index = new_current
                     self._last_next_index = new_next
-                    self.show_all_classes_schedule()  # или refresh_all_classes()
+                elif new_current != self._last_lesson_index or new_next != self._last_next_index:
+                    self._last_lesson_index = new_current
+                    self._last_next_index = new_next
+                    self.show_all_classes_schedule()
                 self.clock_job = self.root.after(1000, self.update_clock)
         except:
             pass
-
     def get_current_lesson_info(self):
         """Получение информации о текущем или следующем уроке"""
         now = datetime.now()

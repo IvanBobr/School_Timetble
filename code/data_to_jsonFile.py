@@ -4,12 +4,27 @@ from parsing_word import *
 import pprint
 
 def make_jsonFile():    
+    # try:
+    #     doc_Word = Word(name="../downloads/changes.docx")
+    # except Exception as e:
+    #     print(f"Error reading changes.docx: {e}")
+    #     return {"fromWord": {"replace": [], "skip": [], "day": ""}, "fromExcel": {...}}
+    
+    # Пытаемся загрузить изменения из .docx или .pdf
+    doc_Word = None
     try:
         doc_Word = Word(name="../downloads/changes.docx")
     except Exception as e:
         print(f"Error reading changes.docx: {e}")
-        return {"fromWord": {"replace": [], "skip": [], "day": ""}, "fromExcel": {...}}
-    
+        try:
+            from parsing_pdf import PDF
+            doc_Word = PDF(name="../downloads/changes.pdf")
+            print("Using PDF parser for changes")
+        except Exception as e2:
+            print(f"Error reading changes.pdf: {e2}")
+            # Если ни один файл не найден, возвращаем пустые данные
+            return {"fromWord": {"replace": [], "skip": [], "day": ""}, "fromExcel": {...}}
+
     doc_Word.make_sp_skip()
     doc_Word.make_sp_repl()
 
