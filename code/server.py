@@ -33,6 +33,9 @@ CURRENT_SCHEDULE = None
 def get_schedule():
     try:
         data = data_to_jsonFile.make_jsonFile()
+        # Принудительная сериализация с заменой несериализуемых объектов на строки
+        import json
+        data = json.loads(json.dumps(data, default=str))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     return jsonify(data)
