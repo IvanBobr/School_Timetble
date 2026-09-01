@@ -33,7 +33,7 @@ jobs:
           pyinstaller --onefile --name "TimetableServer" --paths "$(python -c 'import site; print(site.getsitepackages()[0])')" --hidden-import flask --hidden-import pandas --hidden-import openpyxl --hidden-import lxml --hidden-import python_docx --hidden-import xlrd --hidden-import pdfplumber --hidden-import requests --collect-all flask --collect-all pandas --collect-all openpyxl --collect-all requests --collect-all pdfplumber code/server.py
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: TimetableBuild
           path: dist/
