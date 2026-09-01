@@ -49,7 +49,7 @@ def fetch_schedule(server_ip=None):
                 print(f"Trying to connect to {ip}...")
                 url = f'http://{ip}:5000/api/schedule'
                 try:
-                    response = requests.get(url, timeout=2)
+                    response = requests.get(url, timeout=10)
                     if response.status_code == 200:
                         data = response.json()
                         print(f"OK - got data from {ip}")
@@ -70,7 +70,7 @@ def fetch_schedule(server_ip=None):
         # 3. Если передан конкретный IP (например, из аргумента)
         url = f'http://{server_ip}:5000/api/schedule'
         try:
-            response = requests.get(url, timeout=5)
+            response = requests.get(url, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 print("OK - got data from server")
