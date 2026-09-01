@@ -50,7 +50,14 @@ def make_jsonFile():
         for class_name in excel_classes:
                     data_return["fromExcel"]["schedule"][day][class_name] = doc_Xls.make_rasp_by_dayclass(day, class_name)
 
-
+    def make_jsonFile():
+    # ... после формирования data_return ...
+    # Преобразовать все множества в списки
+    if 'fromExcel' in data_return:
+        for key in ['sp_classes', 'sp_rooms', 'sp_subjects']:
+            if key in data_return['fromExcel'] and isinstance(data_return['fromExcel'][key], set):
+                data_return['fromExcel'][key] = list(data_return['fromExcel'][key])
+                
     print('\n\n', data_return.keys(), '\n', data_return["fromWord"].keys(), '\n', data_return["fromExcel"].keys())
     print('\n', data_return["fromExcel"]["sp_classes"])
     print('\n', data_return["fromExcel"]["sp_subjects"])
