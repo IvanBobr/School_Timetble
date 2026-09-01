@@ -3,20 +3,21 @@ name: Build EXE
 on:
   push:
     tags:
-      - 'v*'              # запускается при создании тега, начинающегося с v (например, v1.0.0)
-  workflow_dispatch:      # позволяет запускать вручную из интерфейса GitHub
+      - 'v*'              # автоматический запуск при создании тега (v1.0.0, v2.1.3 и т.д.)
+  workflow_dispatch:      # ручной запуск из интерфейса GitHub
 
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'    # 3.11 стабильнее для PyInstaller
 
       - name: Install dependencies
         run: |
@@ -24,16 +25,51 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pdfplumber
 
-      - name: Build Client
+      - name: Build Client (TimetableClient.exe)
         run: |
-          pyinstaller --onefile --windowed --name "TimetableClient" --paths "$(python -c 'import site; print(site.getsitepackages()[0])')" --hidden-import requests --hidden-import charset_normalizer --hidden-import idna --hidden-import urllib3 --hidden-import certifi --hidden-import tkinter --collect-all requests code/timetable.py
+          pyinstaller --onefile --windowed --name "TimetableClient" `
+            --paths "$(python -c 'import site; print(site.getsitepackages()[0])')" `
+            --hidden-import requests `
+            --hidden-import charset_normalizer `
+            --hidden-import idna `
+            --hidden-import urllib3 `
+            --hidden-import certifi `
+            --hidden-import tkinter `
+            --collect-all requests `
+            code/timetable.py
 
-      - name: Build Server
+      - name: Build Server (TimetableServer.exe)
         run: |
-          pyinstaller --onefile --name "TimetableServer" --paths "$(python -c 'import site; print(site.getsitepackages()[0])')" --hidden-import flask --hidden-import pandas --hidden-import openpyxl --hidden-import lxml --hidden-import python_docx --hidden-import xlrd --hidden-import pdfplumber --hidden-import requests --collect-all flask --collect-all pandas --collect-all openpyxl --collect-all requests --collect-all pdfplumber code/server.py
+          pyinstaller --onefile --name "TimetableServer" `
+            --paths "$(python -c 'import site; print(site.getsitepackages()[0])')" `
+            --hidden-import flask `
+            --hidden-import pandas `
+            --hidden-import openpyxl `
+            --hidden-import lxml `
+            --hidden-import python_docx `
+            --hidden-import docx `
+            --hidden-import xlrd `
+            --hidden-import pdfplumber `
+            --hidden-import requests `
+            --collect-all flask `
+            --collect-all pandas `
+            --collect-all openpyxl `
+            --collect-all requests `
+            --collect-all pdfplumber `
+            code/server.py
 
-      - name: Upload artifacts
+      - name: Upload artifacts (for manual download)
         uses: actions/upload-artifact@v4
         with:
           name: TimetableBuild
           path: dist/
+
+      - name: Upload to Release (only for tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/TimetableClient.exe
+            dist/TimetableServer.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
