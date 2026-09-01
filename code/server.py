@@ -1,6 +1,7 @@
 from flask import Flask, send_file, request, jsonify
 import os
 import data_to_jsonFile
+import sys
 
 app = Flask(__name__)
 
@@ -40,5 +41,12 @@ def get_schedule():
         return jsonify({"error": str(e)}), 500
     return jsonify(data)
 
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Если передан аргумент командной строки, используем его
+    if len(sys.argv) > 1:
+        host_ip = sys.argv[1]
+    else:
+        # Иначе читаем из переменной окружения или используем по умолчанию
+        host_ip = os.environ.get('SERVER_HOST', '0.0.0.0')
+    app.run(host=host_ip, port=5000)
