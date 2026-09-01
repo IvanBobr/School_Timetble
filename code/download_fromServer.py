@@ -2,7 +2,7 @@ import requests
 import json
 import os
 import configparser
-import os
+import sys
 
 def save_schedule_to_cache(data):
     try:
@@ -26,14 +26,18 @@ def load_schedule_from_cache():
         return None
 
 def get_server_ips_from_config():
-    """Возвращает список IP-адресов из config.ini"""
+    """Возвращает список IP-адресов из config.ini, который лежит рядом с исполняемым файлом."""
     config = configparser.ConfigParser()
-    config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+    # Определяем базовую папку:
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)   # папка с .exe
+    else:
+        base_dir = os.path.dirname(__file__)        # папка со скриптом
+    config_path = os.path.join(base_dir, 'config.ini')
     if os.path.exists(config_path):
         config.read(config_path)
         try:
             ips_str = config.get('Server', 'ips')
-            # Разбиваем по запятой, удаляем пробелы, фильтруем пустые
             ips = [ip.strip() for ip in ips_str.split(',') if ip.strip()]
             return ips
         except (configparser.NoSectionError, configparser.NoOptionError):
