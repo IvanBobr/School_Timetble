@@ -12,6 +12,8 @@ class App:
         self.root.title("📋 Школьное расписание")
         self.root.configure(bg='black')
 
+        self.debug_time = None
+
         self._last_lesson_index = None
         self._last_next_index = None
 
@@ -29,6 +31,12 @@ class App:
         self.small_font = font.Font(family="Courier", size=14)
         self.button_font = font.Font(family="Courier", size=16, weight="bold")
 
+        # Автоперелистывание в "текущих уроках"
+        self.current_classes_page = 0       # текущая страница
+        self.classes_per_page = 10          # сколько классов на странице
+        self.auto_flip_job = None           # идентификатор таймера
+        self.auto_flip_interval = 15000     # 15 секунд (в миллисекундах)
+
         # Время уроков
         self.lesson_times = [
             ("08:30", "09:15"),
@@ -43,7 +51,7 @@ class App:
 
         # Дни недели
         self.days_of_week = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"]
-        weekday_index = datetime.now().weekday()
+        weekday_index = self.get_time_now().weekday()
         self.day_today = self.days_of_week[weekday_index % 6]
 
          # --- Устанавливаем начальные значения для сравнения в update_clock ---
@@ -96,6 +104,31 @@ class App:
         # self._last_lesson_index, self._last_next_index, _ = self.get_current_lesson_info()
         self.root.mainloop()   
 
+    def get_time_now(self):
+        if self.debug_time:
+            return self.debug_time
+        return datetime.now()
+
+    def start_auto_flip(self):
+        """Старт перелистывания страниц"""
+        self.stop_auto_flip()
+        self.auto_flip_job = self.root.after(self.auto_flip_interval, self.next_classes_page)
+
+    def stop_auto_flip(self):
+        """Остановка авто перелистывания"""
+        if self.auto_flip_job:
+            self.root.after_cancel(self.auto_flip_job)
+            self.auto_flip_job = None
+
+    def next_classes_page(self):
+        """Переключение на следующую страницу"""
+        if not self.is_main_screen:
+            return # на главном экране
+
+        total_pages = max(1, (len(self.all_classes) + self.classes_per_page - 1) // self.classes_per_page)
+        self.current_classes_page = (self.current_classes_page + 1) % total_pages
+        self.show_all_classes_schedule()
+
     def create_class_groups(self):
         """Создание групп классов для постраничного просмотра"""
         if not self.all_classes:
@@ -142,7 +175,7 @@ class App:
         day_str, month_str = date_str.split()
         day = int(day_str)
         month = month_map[month_str.lower()]
-        year = date.today().year  # берем текущий год
+        year = self.get_time_now().date().year  # берем текущий год
         
         return date(year, month, day)
 
@@ -165,7 +198,7 @@ class App:
         if date_changes is None:
             return data_return
 
-        today = date.today()
+        today = self.get_time_now().date()
         print(f"Date from changes: {date_changes}, today: {today}")
 
         # Применяем изменения только если дата совпадает
@@ -197,6 +230,48 @@ class App:
 
         return data_return
 
+    def open_debug_dialog(self):
+        """Открыть окно ввода даты и времени для debug-режима."""
+        from tkinter import simpledialog
+
+        # Пример: ввод в формате "2026-09-22 13:55"
+        default = self.debug_time.strftime("%Y-%m-%d %H:%M") if self.debug_time else datetime.now().strftime("%Y-%m-%d %H:%M")
+        answer = simpledialog.askstring(
+            "Debug: установить дату и время",
+            "Введите дату и время в формате:\nYYYY-MM-DD HH:MM\n\nОставьте пустым для возврата к реальному времени.",
+            initialvalue=default
+        )
+        if answer is None:
+            return  # отмена
+        answer = answer.strip()
+        if answer == "":
+            self.debug_time = None
+            print("Debug: возврат к реальному времени")
+        else:
+            try:
+                self.debug_time = datetime.strptime(answer, "%Y-%m-%d %H:%M")
+                print(f"Debug: время установлено на {self.debug_time}")
+            except ValueError:
+                from tkinter import messagebox
+                messagebox.showerror("Ошибка", "Неверный формат. Используйте YYYY-MM-DD HH:MM")
+                return
+
+        # Обновляем день недели по debug-времени
+        weekday_index = self.get_time_now().weekday()
+        if weekday_index == 6:
+            from tkinter import messagebox
+            messagebox.showinfo("Выходной", "Воскресенье - выходной день в школе")
+            self.day_today = self.days_of_week[0]
+        else:
+            self.day_today = self.days_of_week[weekday_index % 6]
+
+        # Сбрасываем страницу текущих уроков
+        self.current_classes_page = 0
+
+        # Пересобираем расписание и перерисовываем
+        self.rasp_wth_changes = self.make_rasp_wth_changes()
+        self.show_all_classes_schedule()
+
     def setup_window(self):
         """Настройка главного окна"""
         screen_width = self.root.winfo_screenwidth()
@@ -216,10 +291,20 @@ class App:
         self.root.bind('<F11>', lambda e: self.root.attributes('-fullscreen',
                                                                not self.root.attributes('-fullscreen')))
         self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
+        # Ctrl+Shift+D — debug-режим (установка даты и времени)
+        self.root.bind('<Control-Shift-D>', lambda e: self.open_debug_dialog())
+        self.root.bind('<Control-Shift-d>', lambda e: self.open_debug_dialog())
+        self.root.bind('<Control-Shift-в>', lambda e: self.open_debug_dialog())   # русская раскладка
+        self.root.bind('<F12>', lambda e: self.open_debug_dialog())               # универсальная
 
     def clear_window(self):
         """Очистка окна"""
         # Отменяем таймер обновления часов
+        self.stop_auto_flip()
+        self.root.unbind_all("<MouseWheel>")
+        self.root.unbind_all("<Button-4>")
+        self.root.unbind_all("<Button-5>")
+
         if hasattr(self, 'clock_job') and self.clock_job:
             self.root.after_cancel(self.clock_job)
             self.clock_job = None
@@ -242,10 +327,12 @@ class App:
         title_label.pack(side=tk.LEFT)
 
         # Часы
+        clock_color = '#FF3300' if self.debug_time else self.text_color # КРАСНЫЕ ПРИ DEBUG
         self.clock_label = tk.Label(header_frame,
                                     font=self.title_font,
-                                    fg=self.text_color,
+                                    fg=clock_color,
                                     bg='black')
+        
         self.clock_label.pack(side=tk.RIGHT)
 
         # Обновление времени
@@ -361,7 +448,7 @@ class App:
 
     def update_clock(self):
         try:
-            current_time = datetime.now().strftime("%H:%M:%S")
+            current_time = self.get_time_now().strftime("%H:%M:%S")
             if hasattr(self, 'clock_label') and self.clock_label.winfo_exists():
                 self.clock_label.config(text=current_time)
                 new_current, new_next, _ = self.get_current_lesson_info()
@@ -372,12 +459,14 @@ class App:
                     self._last_lesson_index = new_current
                     self._last_next_index = new_next
                     self.show_all_classes_schedule()
+                    return
                 self.clock_job = self.root.after(1000, self.update_clock)
-        except:
-            pass
+        except Exception as e:
+            print(f"[Clock Error] {e}")
+
     def get_current_lesson_info(self):
         """Получение информации о текущем или следующем уроке"""
-        now = datetime.now()
+        now = self.get_time_now()
 
         # Находим текущий урок или следующую переменную
         current_lesson = None
@@ -404,6 +493,15 @@ class App:
 
         return current_lesson, next_lesson, is_break
 
+    def prev_classes_page(self):
+        total = max(1, (len(self.all_classes) + self.classes_per_page - 1) // self.classes_per_page)
+        self.current_classes_page = (self.current_classes_page - 1) % total
+        self.show_all_classes_schedule()
+
+    def next_classes_page_manual(self):
+        total = max(1, (len(self.all_classes) + self.classes_per_page - 1) // self.classes_per_page)
+        self.current_classes_page = (self.current_classes_page + 1) % total
+        self.show_all_classes_schedule()
 
     def show_all_classes_schedule(self):
         self.is_main_screen = True
@@ -453,7 +551,12 @@ class App:
             header_label.grid(row=0, column=i, sticky='ew')
 
         row_idx = 1
-        for class_name in self.all_classes:
+
+        start_index = self.current_classes_page * self.classes_per_page
+        end_index = start_index + self.classes_per_page
+        current_page_classes = self.all_classes[start_index : end_index]
+
+        for class_name in current_page_classes:
             if class_name in day_schedule:
                 lessons = day_schedule[class_name]
                 if lesson_to_show is not None and lesson_to_show < len(lessons):
@@ -500,10 +603,13 @@ class App:
             status_text = f"Сейчас перемена, следующий урок в {start_time}"
         else:
             status_text = "Учебный день завершён"
-
-        self.create_footer(f"Статус: {status_text} | Всего классов: {len(self.all_classes)} | День: {current_day}")
+        
+        total_page = max(1, (len(self.all_classes) + self.classes_per_page - 1) // self.classes_per_page)
+        self.create_footer(f"Статус: {status_text} | Страница: {self.current_classes_page+1}/{total_page} | Всего классов: {len(self.all_classes)} | День: {current_day}")
 
         buttons = [
+            ("◀ СТРАНИЦА", self.prev_classes_page),
+            ("СТРАНИЦА ▶", self.next_classes_page_manual),
             ("ОБНОВИТЬ", self.refresh_all_classes),
             ("ВСЕ РАСПИСАНИЕ", self.show_full_schedule),
             ("ВЫБРАТЬ КЛАСС", self.show_class_selection),
@@ -513,6 +619,8 @@ class App:
 
         for i in range(len(headers)):
             table_frame.columnconfigure(i, weight=1)
+
+        self.start_auto_flip()
 
 
     def show_class_schedule(self, class_name):
@@ -556,7 +664,7 @@ class App:
             schedule_to_show = rasp[class_name]
 
             if not self.show_all_lessons:
-                current_time = datetime.now().time()
+                current_time = self.get_time_now().time()
                 schedule_to_show = []
                 for lesson in rasp[class_name]:
                     lesson_time_str = lesson[1]
@@ -825,9 +933,24 @@ class App:
         # Кнопки навигации по группам классов
         self.create_group_navigation_buttons()
 
-        # Основная таблица
-        table_frame = tk.Frame(self.root, bg=self.bg_color)
-        table_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
+        # Основная таблица со скроллом
+        container = tk.Frame(self.root, bg=self.bg_color)
+        container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
+
+        canvas = tk.Canvas(container, bg=self.bg_color, highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        table_frame = tk.Frame(canvas, bg=self.bg_color)
+
+        table_frame.bind("<Configure>",
+                        lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=table_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
 
         # Заголовки таблицы
         max_lessons = 0
@@ -907,8 +1030,6 @@ class App:
         for i in range(len(headers)):
             table_frame.columnconfigure(i, weight=1)
 
-        for i in range(row_idx):
-            table_frame.rowconfigure(i, weight=1)
 
         self.reset_idle_timer()
 
