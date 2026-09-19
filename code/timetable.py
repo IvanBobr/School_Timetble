@@ -120,12 +120,17 @@ class App:
             self.root.after_cancel(self.auto_flip_job)
             self.auto_flip_job = None
 
-    def next_classes_page(self):
-        """Переключение на следующую страницу"""
-        if not self.is_main_screen:
-            return # на главном экране
 
-        total_pages = max(1, (len(self.all_classes) + self.classes_per_page - 1) // self.classes_per_page)
+    def next_classes_page(self):
+        if not self.is_main_screen:
+            return
+        # Получаем количество классов с уроком на текущем слоте
+        current_lesson, next_lesson, _ = self.get_current_lesson_info()
+        lesson_to_show = current_lesson if current_lesson is not None else next_lesson
+        day_schedule = self.rasp_wth_changes.get(self.day_today, {})
+        classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
+
+        total_pages = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
         self.current_classes_page = (self.current_classes_page + 1) % total_pages
         self.show_all_classes_schedule()
 
@@ -271,6 +276,18 @@ class App:
         # Пересобираем расписание и перерисовываем
         self.rasp_wth_changes = self.make_rasp_wth_changes()
         self.show_all_classes_schedule()
+
+    def get_classes_with_lesson(self, day_schedule, lesson_idx):
+        """Возвращает список классов, у которых есть урок в данное время."""
+        if lesson_idx is None:
+            return []
+        result = []
+        for cls in self.all_classes:
+            if cls in day_schedule:
+                lessons = day_schedule[cls]
+                if lesson_idx < len(lessons):
+                    result.append(cls)
+        return result
 
     def setup_window(self):
         """Настройка главного окна"""
@@ -457,6 +474,7 @@ class App:
                 elif new_current != self._last_lesson_index or new_next != self._last_next_index:
                     self._last_lesson_index = new_current
                     self._last_next_index = new_next
+                    self.current_classes_page = 0   # сброс на первую страницу при смене урока
                     self.show_all_classes_schedule()
                     return
                 self.clock_job = self.root.after(1000, self.update_clock)
@@ -493,12 +511,23 @@ class App:
         return current_lesson, next_lesson, is_break
 
     def prev_classes_page(self):
-        total = max(1, (len(self.all_classes) + self.classes_per_page - 1) // self.classes_per_page)
+        current_lesson, next_lesson, _ = self.get_current_lesson_info()
+        lesson_to_show = current_lesson if current_lesson is not None else next_lesson
+        day_schedule = self.rasp_wth_changes.get(self.day_today, {})
+        classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
+
+        total = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
         self.current_classes_page = (self.current_classes_page - 1) % total
         self.show_all_classes_schedule()
 
+
     def next_classes_page_manual(self):
-        total = max(1, (len(self.all_classes) + self.classes_per_page - 1) // self.classes_per_page)
+        current_lesson, next_lesson, _ = self.get_current_lesson_info()
+        lesson_to_show = current_lesson if current_lesson is not None else next_lesson
+        day_schedule = self.rasp_wth_changes.get(self.day_today, {})
+        classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
+
+        total = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
         self.current_classes_page = (self.current_classes_page + 1) % total
         self.show_all_classes_schedule()
 
@@ -551,9 +580,18 @@ class App:
 
         row_idx = 1
 
+        # Только классы, у которых реально есть урок на этом слоте
+        classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
+
+        total_page = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
+
+        # Клампим текущую страницу, если она вышла за пределы
+        if self.current_classes_page >= total_page:
+            self.current_classes_page = 0
+
         start_index = self.current_classes_page * self.classes_per_page
         end_index = start_index + self.classes_per_page
-        current_page_classes = self.all_classes[start_index : end_index]
+        current_page_classes = classes_with_lesson[start_index : end_index]
 
         for class_name in current_page_classes:
             if class_name in day_schedule:
@@ -603,8 +641,9 @@ class App:
         else:
             status_text = "Учебный день завершён"
         
-        total_page = max(1, (len(self.all_classes) + self.classes_per_page - 1) // self.classes_per_page)
-        self.create_footer(f"Статус: {status_text} | Страница: {self.current_classes_page+1}/{total_page} | Всего классов: {len(self.all_classes)} | День: {current_day}")
+        total_page = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
+        self.create_footer(f"Статус: {status_text} | Страница: {self.current_classes_page+1}/{total_page} | "
+                f"Классов с уроком: {len(classes_with_lesson)} | День: {current_day}")
 
         buttons = [
             ("◀ СТРАНИЦА", self.prev_classes_page),
