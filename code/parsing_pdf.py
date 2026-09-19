@@ -72,7 +72,9 @@ class PDF:
                     # Ищем слово в dict_replace
                     for word, num in dict_replace.items():
                         if word in line:
-                            self.sp_skip.append((parts[0], num))
+                            for num_i in range (1, num):
+                                self.sp_skip.append((parts[0], num_i))
+                            
                             break
                 print("Found lesson to skip (PDF)!")
 
