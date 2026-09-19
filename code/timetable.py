@@ -294,7 +294,6 @@ class App:
         # Ctrl+Shift+D — debug-режим (установка даты и времени)
         self.root.bind('<Control-Shift-D>', lambda e: self.open_debug_dialog())
         self.root.bind('<Control-Shift-d>', lambda e: self.open_debug_dialog())
-        self.root.bind('<Control-Shift-в>', lambda e: self.open_debug_dialog())   # русская раскладка
         self.root.bind('<F12>', lambda e: self.open_debug_dialog())               # универсальная
 
     def clear_window(self):
