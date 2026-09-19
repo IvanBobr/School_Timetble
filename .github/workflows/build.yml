@@ -60,6 +60,7 @@ jobs:
             --collect-all openpyxl `
             --collect-all requests `
             --collect-all pdfplumber `
+            --collect-all xlrd `
             code/server.py
 
       - name: Upload artifacts
