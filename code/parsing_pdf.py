@@ -80,92 +80,80 @@ class PDF:
 
     def make_sp_repl(self):
         for line in self.full_text:
-            if 'урок' in line and 'урока не будет' not in line:
-                # Пытаемся распарсить строку как замену
-                parts = re.split(r'\t+|\s+', line)
-                # Очищаем от лишних слов
-                # Пример: "1 урок 6-5 математика Золотарева О.С. 312 каб."
-                # Ищем номер урока (первая цифра)
-                if not parts:
+            # В одной строке может быть несколько уроков: "2 урок 5-8 ... 2 урок 5-12 ..."
+            # Разбиваем по шаблону "N урок"
+            chunks = re.split(r'(?=\d+\s+урок)', line)
+            for chunk in chunks:
+                chunk = chunk.strip()
+                if not chunk:
                     continue
-                # Попробуем найти номер урока
-                lesson_num = None
-                for i, p in enumerate(parts):
-                    if p.isdigit() and i+1 < len(parts) and (parts[i+1] == 'урок' or parts[i+1] == 'урока'):
-                        lesson_num = int(p)
-                        break
-                if lesson_num is None:
-                    continue
-                # Ищем класс: строка с дефисом, например "6-5"
-                class_name = None
-                for p in parts:
-                    if '-' in p and len(p) >= 3:
-                        class_name = p
-                        break
-                if class_name is None:
-                    continue
-                # Ищем кабинет: строка с "каб." или просто номер
-                # Ищем кабинет: строка с "каб." или просто число
-                room = ''
-                for p in parts:
-                    if 'каб' in p or (p.isdigit() and len(p) >= 2):
-                        room = p.replace('каб.', '').strip()
-                        break
 
-                # Всё, что между классом и кабинетом — это предмет + учитель
-                start_idx = parts.index(class_name) if class_name in parts else -1
-                end_idx = parts.index(room) if room and room in parts else -1
-
-                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                    middle = ' '.join(parts[start_idx + 1:end_idx]).strip()
-                else:
-                    middle = ''
-
-                # Извлекаем ФИО учителя в конце строки (оканчивается на инициалы через точку)
-                # Регулярка: слово с большой буквы + пробел + одна или несколько инициалов (А.Б. или А.Б.В.)
-                teacher_match = re.search(r'([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ]\.)+)$', middle)
-
-                if teacher_match:
-                    teacher = teacher_match.group(1).strip()
-                    subject = middle[:teacher_match.start()].strip()
-                else:
-                    teacher = ''
-                    subject = middle
-
-                # Формируем запись
-                self.sp_repl.append([
-                    lesson_num,
-                    self.lesson_times[lesson_num - 1][0],
-                    subject,
-                    class_name,
-                    room,
-                    teacher,
-                    "ИЗМЕНЕНО"
-                ])
-                print("found lesson to replace (PDF):", [lesson_num, subject, class_name, room, teacher])
-            elif 'урока не будет' in line:
-                # Отмена урока
-                parts = re.split(r'\t+|\s+', line)
-                lesson_num = None
-                for p in parts:
-                    if p.isdigit():
-                        lesson_num = int(p)
-                        break
-                if lesson_num is not None:
-                    # Ищем класс
-                    class_name = None
-                    for p in parts:
-                        if '-' in p and len(p) >= 3:
-                            class_name = p
-                            break
-                    if class_name:
+                # Отмена урока: "N урок X-Y урока не будет"
+                cancel_match = re.match(r'(\d+)\s+урок\s+(\d+-\d+)\s+урока\s+не\s+будет', chunk)
+                if cancel_match:
+                    lesson_num = int(cancel_match.group(1))
+                    class_name = cancel_match.group(2)
+                    if 1 <= lesson_num <= len(self.lesson_times):
                         self.sp_repl.append([
                             lesson_num,
                             self.lesson_times[lesson_num - 1][0],
-                            '-',
-                            class_name,
-                            '-',
-                            '-',
-                            "ОТМЕНЕНО"
+                            '-', class_name, '-', '-', "ОТМЕНЕНО"
                         ])
-                        print("founded lesson that wouldn't be today (PDF)")
+                        print(f"Cancelled (PDF): {class_name}, урок {lesson_num}")
+                    continue
+
+                # Замена: "N урок X-Y <остаток>"
+                m = re.match(r'(\d+)\s+урок\s+(\d+-\d+)\s+(.*)', chunk)
+                if not m:
+                    continue
+
+                lesson_num = int(m.group(1))
+                class_name = m.group(2)
+                rest = m.group(3).strip()
+
+                # Убираем "каб." в конце (если есть)
+                rest = re.sub(r'\s*каб\.?\s*$', '', rest).strip()
+
+                # ---------- Кабинет ----------
+                # Может быть "313", "404/321", "320/121"
+                room_match = re.search(r'(\d+(?:/\d+)?)\s*$', rest)
+                if room_match:
+                    room = room_match.group(1)
+                    rest = rest[:room_match.start()].strip()
+                else:
+                    room = ''
+
+                # ---------- Учитель(я) ----------
+                # Формат: "Слово И.О." или "Слово И.О./Слово И.О."
+                # Ищем в конце строки, перед кабинетом
+                teacher_pattern = (
+                    r'([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ]\.)+)'      # первый учитель
+                    r'(?:/'                                  # опциональный слэш
+                    r'([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ]\.)+))?'     # второй учитель
+                    r'\s*$'
+                )
+                teacher_match = re.search(teacher_pattern, rest)
+
+                if teacher_match:
+                    if teacher_match.group(2):
+                        teacher = f"{teacher_match.group(1)}/{teacher_match.group(2)}"
+                    else:
+                        teacher = teacher_match.group(1)
+                    subject = rest[:teacher_match.start()].strip()
+                else:
+                    teacher = ''
+                    subject = rest
+
+                # ---------- Формируем запись ----------
+                if 1 <= lesson_num <= len(self.lesson_times):
+                    self.sp_repl.append([
+                        lesson_num,
+                        self.lesson_times[lesson_num - 1][0],
+                        subject,
+                        class_name,
+                        room,
+                        teacher,
+                        "ИЗМЕНЕНО"
+                    ])
+                    print(f"Replaced (PDF): {class_name}, урок {lesson_num}, "
+                        f"предмет='{subject}', каб.='{room}', учитель='{teacher}'")
