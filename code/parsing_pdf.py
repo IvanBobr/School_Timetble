@@ -105,26 +105,33 @@ class PDF:
                 if class_name is None:
                     continue
                 # Ищем кабинет: строка с "каб." или просто номер
+                # Ищем кабинет: строка с "каб." или просто число
                 room = ''
                 for p in parts:
                     if 'каб' in p or (p.isdigit() and len(p) >= 2):
                         room = p.replace('каб.', '').strip()
                         break
-                # Предмет и учитель – всё между классом и кабинетом
-                # Упростим: берём все части после класса до кабинета
+
+                # Всё, что между классом и кабинетом — это предмет + учитель
                 start_idx = parts.index(class_name) if class_name in parts else -1
                 end_idx = parts.index(room) if room and room in parts else -1
+
                 if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                    subject_parts = parts[start_idx+1:end_idx]
-                    subject = ' '.join(subject_parts).strip()
+                    middle = ' '.join(parts[start_idx + 1:end_idx]).strip()
                 else:
-                    subject = ''
-                # Учитель – после кабинета (иногда перед "каб.")
-                teacher = ''
-                if room and room in parts:
-                    idx = parts.index(room)
-                    if idx + 1 < len(parts):
-                        teacher = ' '.join(parts[idx+1:])
+                    middle = ''
+
+                # Извлекаем ФИО учителя в конце строки (оканчивается на инициалы через точку)
+                # Регулярка: слово с большой буквы + пробел + одна или несколько инициалов (А.Б. или А.Б.В.)
+                teacher_match = re.search(r'([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ]\.)+)$', middle)
+
+                if teacher_match:
+                    teacher = teacher_match.group(1).strip()
+                    subject = middle[:teacher_match.start()].strip()
+                else:
+                    teacher = ''
+                    subject = middle
+
                 # Формируем запись
                 self.sp_repl.append([
                     lesson_num,
