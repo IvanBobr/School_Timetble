@@ -1349,7 +1349,7 @@ class App:
 
         self._make_chip_button(
             shortcut_row,
-            f"→  Общее расписание для {group['name'].lower().replace("-е", "-х").replace("классы", "классов")}",
+            f"-> Общее расписание для {group['name'].lower().replace('е', '-x').replace('классы', 'классов')}",
             command=lambda g=group: self._open_full_for_group(g),
             font_=self.button_font
         ).pack(side=tk.LEFT)
