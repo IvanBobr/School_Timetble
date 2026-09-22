@@ -15,14 +15,16 @@ class App:
         self.debug_time = None
         self._last_lesson_index = None
         self._last_next_index = None
+        self._current_screen = 'main'
 
-        # === ПАЛИТРА (стиль аэропортового табло) ===
+        # === ПАЛИТРА ===
         self.bg_color        = '#0A0E1A'
         self.bg_panel        = '#131826'
         self.bg_header       = '#0F1626'
         self.bg_row_even     = '#0A0E1A'
         self.bg_row_odd      = '#0F1626'
         self.bg_row_first_col = '#182238'
+        self.bg_row_first_col_hover = '#243049'
         self.separator_color = '#1E2A3F'
 
         self.text_color      = '#E8EDF5'
@@ -40,6 +42,11 @@ class App:
         self.status_ok       = '#4ADE80'
         self.status_warn     = '#FF9F1C'
         self.status_cancel   = '#EF4444'
+
+        self.btn_bg          = '#1A2233'
+        self.btn_hover       = '#243049'
+        self.btn_disabled_bg = '#151A24'
+        self.btn_disabled_fg = '#3E4A5C'
 
         # === ШРИФТЫ ===
         FONT = "Segoe UI"
@@ -68,6 +75,7 @@ class App:
         self.rows_container = None
         self.footer_label = None
         self.status_banner_label = None
+        self._parallel_card = None
         self.page_info = {"current": 1, "total": 1, "classes_count": 0, "day": ""}
         self.current_page_data = []
 
@@ -141,6 +149,39 @@ class App:
     def _row_bg(self, index):
         return self.bg_row_even if index % 2 == 0 else self.bg_row_odd
 
+    # ---------- КЛИКАБЕЛЬНАЯ ЯЧЕЙКА КЛАССА ----------
+    def _make_class_cell(self, parent, class_name, bg_color, fg_color, font_):
+        lbl = tk.Label(parent, text=class_name, font=font_,
+                       fg=fg_color, bg=bg_color,
+                       anchor="center", justify="center",
+                       cursor='hand2')
+
+        def _click(_e, c=class_name):
+            self.show_class_schedule(c)
+        def _enter(_e, l=lbl):
+            l.configure(bg=self.bg_row_first_col_hover)
+        def _leave(_e, l=lbl, b=bg_color):
+            l.configure(bg=b)
+
+        lbl.bind('<Button-1>', _click)
+        lbl.bind('<Enter>', _enter)
+        lbl.bind('<Leave>', _leave)
+        return lbl
+
+    # ---------- СТАНДАРТНАЯ ТРОЙКА НАВИГАЦИИ ----------
+    def _get_nav_trio(self, active_screen):
+        return [
+            ("ТЕКУЩИЕ УРОКИ",
+             self.show_all_classes_schedule,
+             {'active': active_screen == 'main'}),
+            ("ВСЁ РАСПИСАНИЕ",
+             self.show_full_schedule,
+             {'active': active_screen == 'full'}),
+            ("ВЫБРАТЬ КЛАСС",
+             self.show_class_selection,
+             {'active': active_screen == 'selection'}),
+        ]
+
     # ---------- FLIP-АНИМАЦИЯ ----------
     def _prepare_cells(self, row_data, default_bg=None):
         if default_bg is None:
@@ -190,9 +231,12 @@ class App:
 
         for i, (text, bg, fg) in enumerate(self._prepare_cells(row_data, row_bg)):
             lbl_font = self.data_mono if i in (1, 2, 4) else self.data_font
-            lbl = tk.Label(row_frame, text=text, font=lbl_font,
-                           fg=fg, bg=bg, padx=10, pady=12,
-                           anchor="center", justify="center")
+            if i == 0:
+                lbl = self._make_class_cell(row_frame, text, bg, fg, lbl_font)
+            else:
+                lbl = tk.Label(row_frame, text=text, font=lbl_font,
+                               fg=fg, bg=bg, padx=10, pady=12,
+                               anchor="center", justify="center")
             lbl.grid(row=0, column=i, sticky="nsew")
 
         sep = tk.Frame(row_frame, bg=self.separator_color, height=1)
@@ -210,9 +254,12 @@ class App:
             row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
         for i, (text, bg, fg) in enumerate(self._prepare_cells(row_data, row_bg)):
             lbl_font = self.data_mono if i in (1, 2, 4) else self.data_font
-            lbl = tk.Label(row_frame, text=text, font=lbl_font,
-                           fg=fg, bg=bg, padx=10, pady=12,
-                           anchor="center", justify="center")
+            if i == 0:
+                lbl = self._make_class_cell(row_frame, text, bg, fg, lbl_font)
+            else:
+                lbl = tk.Label(row_frame, text=text, font=lbl_font,
+                               fg=fg, bg=bg, padx=10, pady=12,
+                               anchor="center", justify="center")
             lbl.grid(row=0, column=i, sticky="nsew")
         sep = tk.Frame(row_frame, bg=self.separator_color, height=1)
         sep.place(relx=0, rely=1.0, anchor='sw', relwidth=1.0)
@@ -342,9 +389,12 @@ class App:
             row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
         for i, (text, bg, fg) in enumerate(self._prepare_cells(new_row_data, row_bg)):
             lbl_font = self.data_mono if i in (1, 2, 4) else self.data_font
-            lbl = tk.Label(row_frame, text=text, font=lbl_font,
-                           fg=fg, bg=bg, padx=10, pady=12,
-                           anchor="center", justify="center")
+            if i == 0:
+                lbl = self._make_class_cell(row_frame, text, bg, fg, lbl_font)
+            else:
+                lbl = tk.Label(row_frame, text=text, font=lbl_font,
+                               fg=fg, bg=bg, padx=10, pady=12,
+                               anchor="center", justify="center")
             lbl.grid(row=0, column=i, sticky="nsew")
         sep = tk.Frame(row_frame, bg=self.separator_color, height=1)
         sep.place(relx=0, rely=1.0, anchor='sw', relwidth=1.0)
@@ -424,7 +474,8 @@ class App:
         status_text = pi.get("status_text", "")
         self.footer_label.config(
             text=f"Статус: {status_text}  •  Страница: {pi['current']}/{pi['total']}  "
-                 f"•  Классов с уроком: {pi['classes_count']}  •  День: {pi['day']}"
+                 f"•  Классов с уроком: {pi['classes_count']}  •  День: {pi['day']}  "
+                 f"•  Кликните на класс, чтобы открыть его расписание"
         )
 
     def _get_page_rows_data(self, day_schedule, lesson_to_show):
@@ -642,20 +693,35 @@ class App:
         self.rows_container = None
         self.footer_label = None
         self.status_banner_label = None
+        self._parallel_card = None
 
-    # ---------- ВСПОМОГАТЕЛЬНЫЙ: ЧИП-КНОПКА ----------
-    def _make_chip_button(self, parent, text, command, active=False, font_=None):
+    # ---------- КНОПКА-ЧИП ----------
+    def _make_chip_button(self, parent, text, command, active=False, font_=None, disabled=False):
         if font_ is None:
             font_ = self.button_font
+
+        if disabled:
+            btn = tk.Button(
+                parent, text=text, font=font_,
+                bg=self.btn_disabled_bg, fg=self.btn_disabled_fg,
+                activebackground=self.btn_disabled_bg, activeforeground=self.btn_disabled_fg,
+                relief='flat', borderwidth=0, padx=18, pady=10,
+                cursor='arrow', command=lambda: None, highlightthickness=0
+            )
+            return btn
+
         if active:
             bg, fg, hover = self.accent_amber, self.bg_color, '#FFD166'
         else:
-            bg, fg, hover = '#1A2233', self.accent_amber, '#243049'
-        btn = tk.Button(parent, text=text, font=font_,
-                        bg=bg, fg=fg,
-                        activebackground=hover, activeforeground=fg,
-                        relief='flat', borderwidth=0, padx=18, pady=10,
-                        cursor='hand2', command=command, highlightthickness=0)
+            bg, fg, hover = self.btn_bg, self.accent_amber, self.btn_hover
+
+        btn = tk.Button(
+            parent, text=text, font=font_,
+            bg=bg, fg=fg,
+            activebackground=hover, activeforeground=fg,
+            relief='flat', borderwidth=0, padx=18, pady=10,
+            cursor='hand2', command=command, highlightthickness=0
+        )
         btn.bind('<Enter>', lambda e, b=btn, h=hover: b.configure(bg=h))
         btn.bind('<Leave>', lambda e, b=btn, bg_=bg: b.configure(bg=bg_))
         return btn
@@ -674,6 +740,19 @@ class App:
             return True
         print("Сервер недоступен, данные не обновлены")
         return False
+
+    def refresh_current(self):
+        self._fetch_and_apply()
+        screen = getattr(self, '_current_screen', 'main')
+        if screen == 'main':
+            self.show_all_classes_schedule()
+        elif screen == 'full':
+            self.show_full_schedule()
+        elif screen == 'selection':
+            self.show_class_selection()
+        elif screen == 'class':
+            if self.current_class:
+                self.show_class_schedule(self.current_class)
 
     # ---------- ШАПКА / ПАНЕЛИ / КНОПКИ ----------
     def create_header(self, title):
@@ -698,12 +777,10 @@ class App:
         return header_frame
 
     def create_status_bar(self, text=None):
-        """Верхняя полоса. Если text=None — здесь будет баннер статуса (урок/перемена)."""
         info_frame = tk.Frame(self.root, bg=self.bg_panel)
         info_frame.pack(fill=tk.X)
 
         if text is None:
-            # Режим баннера
             self.status_banner_label = tk.Label(
                 info_frame, text="",
                 font=font.Font(family="Segoe UI", size=22, weight="bold"),
@@ -711,7 +788,6 @@ class App:
             )
             self.status_banner_label.pack(pady=12)
         else:
-            # Обычный текст (для остальных экранов)
             self.status_banner_label = tk.Label(
                 info_frame, text=text, font=self.data_font,
                 fg=self.text_dim, bg=self.bg_panel
@@ -722,7 +798,6 @@ class App:
         return info_frame
 
     def _update_status_banner(self):
-        """Обновляет баннер статуса: урок / перемена / завершено."""
         if not self.is_main_screen:
             return
         if not self.status_banner_label or not self.status_banner_label.winfo_exists():
@@ -734,7 +809,7 @@ class App:
             color = self.status_ok
         elif next_lesson is not None:
             start_time, _ = self.lesson_times[next_lesson]
-            text = f"ПЕРЕМЕНА  •  следующий урок в {start_time}"
+            text = f"●  ПЕРЕМЕНА  •  следующий урок в {start_time}"
             color = self.accent_amber
         else:
             text = "●  УЧЕБНЫЙ ДЕНЬ ЗАВЕРШЁН"
@@ -754,9 +829,40 @@ class App:
         button_frame = tk.Frame(self.root, bg=self.bg_color)
         button_frame.pack(fill=tk.X, padx=30, pady=14)
 
-        for text, command in buttons_config:
-            btn = self._make_chip_button(button_frame, text, command)
+        left_items = []
+        right_items = []
+
+        for item in buttons_config:
+            if len(item) == 2:
+                text, command = item
+                opts = {}
+            else:
+                text, command, opts = item
+            if opts.get('side') == 'right':
+                right_items.append((text, command, opts))
+            else:
+                left_items.append((text, command, opts))
+
+        for text, command, opts in left_items:
+            if text == "SEP":
+                sep = tk.Frame(button_frame, bg=self.separator_color, width=1, height=36)
+                sep.pack(side=tk.LEFT, padx=14)
+                sep.pack_propagate(False)
+                continue
+            btn = self._make_chip_button(
+                button_frame, text, command,
+                active=opts.get('active', False),
+                disabled=opts.get('disabled', False),
+            )
             btn.pack(side=tk.LEFT, padx=6)
+
+        for text, command, opts in reversed(right_items):
+            btn = self._make_chip_button(
+                button_frame, text, command,
+                active=opts.get('active', False),
+                disabled=opts.get('disabled', False),
+            )
+            btn.pack(side=tk.RIGHT, padx=6)
 
         return button_frame
 
@@ -802,10 +908,7 @@ class App:
             if hasattr(self, 'clock_label') and self.clock_label.winfo_exists():
                 self.clock_label.config(text=current_time)
                 new_current, new_next, _ = self.get_current_lesson_info()
-
-                # обновляем баннер каждую секунду (только на главном экране)
                 self._update_status_banner()
-
                 if self._last_lesson_index is None:
                     self._last_lesson_index = new_current
                     self._last_next_index = new_next
@@ -852,21 +955,30 @@ class App:
     # ---------- ГЛАВНЫЙ ЭКРАН ----------
     def show_all_classes_schedule(self):
         self.is_main_screen = True
+        self._current_screen = 'main'
         self.reset_idle_timer()
         self.clear_window()
         self.create_header("✈  ТЕКУЩИЕ УРОКИ — ВСЕ КЛАССЫ  ✈")
-        self.create_status_bar()          # режим баннера
+        self.create_status_bar()
         self._update_status_banner()
 
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения (проверьте подключение к серверу)")
-            self.create_navigation_buttons([("ВЫХОД", self.root.quit)])
+            self.create_navigation_buttons(
+                self._get_nav_trio('main') + [
+                    ("ВЫХОД", self.root.quit, {'side': 'right'}),
+                ]
+            )
             return
 
         current_day = self.day_today
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
-            self.create_navigation_buttons([("ВЫБОР КЛАССА", self.show_class_selection)])
+            self.create_navigation_buttons(
+                self._get_nav_trio('main') + [
+                    ("ВЫХОД", self.root.quit, {'side': 'right'}),
+                ]
+            )
             return
 
         day_schedule = self.rasp_wth_changes[current_day]
@@ -932,34 +1044,41 @@ class App:
 
         self.create_footer(
             f"Статус: {status_text}  •  Страница: {self.current_classes_page+1}/{total_page}  "
-            f"•  Классов с уроком: {len(classes_with_lesson)}  •  День: {current_day}"
+            f"•  Классов с уроком: {len(classes_with_lesson)}  •  День: {current_day}  "
+            f"•  Кликните на класс, чтобы открыть его расписание"
         )
 
+        pages_disabled = total_page <= 1
         buttons = [
-            ("◀  СТРАНИЦА", self.prev_classes_page),
-            ("СТРАНИЦА  ▶", self.next_classes_page_manual),
-            ("ОБНОВИТЬ", self.refresh_all_classes),
-            ("ВСЁ РАСПИСАНИЕ", self.show_full_schedule),
-            ("ВЫБРАТЬ КЛАСС", self.show_class_selection),
-            ("ВЫХОД", self.root.quit)
+            ("◀  СТРАНИЦА", self.prev_classes_page, {'disabled': pages_disabled}),
+            ("СТРАНИЦА  ▶", self.next_classes_page_manual, {'disabled': pages_disabled}),
+            ("SEP", None),
+            ("ОБНОВИТЬ", self.refresh_current),
+            ("SEP", None),
         ]
+        buttons += self._get_nav_trio('main')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         self.start_auto_flip()
 
-    # ---------- ОСТАЛЬНЫЕ ЭКРАНЫ ----------
+    # ---------- РАСПИСАНИЕ КЛАССА ----------
     def show_class_schedule(self, class_name):
         self.is_main_screen = False
+        self._current_screen = 'class'
         self.clear_window()
         self.current_class = class_name
         self.create_header(f"✈  РАСПИСАНИЕ КЛАССА {class_name}  ✈")
 
         if not self.rasp_wth_changes or self.day_today not in self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения")
-            self.create_navigation_buttons([
-                ("НАЗАД", self.show_all_classes_schedule),
-                ("ВЫХОД", self.root.quit),
-            ])
+            buttons = [
+                ("ОБНОВИТЬ", self.refresh_current),
+                ("SEP", None),
+            ]
+            buttons += self._get_nav_trio('class')
+            buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
+            self.create_navigation_buttons(buttons)
             return
         rasp = self.rasp_wth_changes[self.day_today]
         self.create_status_bar(f"Расписание класса {class_name} на текущий день")
@@ -1043,20 +1162,21 @@ class App:
 
         toggle_text = "ТОЛЬКО БУДУЩИЕ" if self.show_all_lessons else "ВСЕ УРОКИ"
         buttons = [
-            ("ОБНОВИТЬ", self.refresh_class_schedule),
+            ("ОБНОВИТЬ", self.refresh_current),
             (toggle_text, self.toggle_lesson_mode),
-            ("ВСЁ РАСПИСАНИЕ", self.show_full_schedule),
-            ("ВЫБРАТЬ КЛАСС", self.show_class_selection),
-            ("К ОБЩЕМУ РАСПИСАНИЮ", self.show_all_classes_schedule),
-            ("ВЫХОД", self.root.quit)
+            ("SEP", None),
         ]
+        buttons += self._get_nav_trio('class')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         for i in range(len(headers)):
             table_frame.columnconfigure(i, weight=1, uniform="cls")
 
+    # ---------- ВЫБОР КЛАССА ----------
     def show_class_selection(self):
         self.is_main_screen = False
+        self._current_screen = 'selection'
         self.clear_window()
         self.create_header("✈  ВЫБОР КЛАССА  ✈")
         self.create_status_bar("Выберите параллель, затем класс для просмотра расписания")
@@ -1064,71 +1184,70 @@ class App:
         main_frame = tk.Frame(self.root, bg=self.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=(0, 15))
 
-        left_panel = tk.Frame(main_frame, bg=self.bg_color, width=650)
-        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        # --- Левая панель: параллели ---
+        left_panel = tk.Frame(main_frame, bg=self.bg_panel, width=340)
+        left_panel.pack(side=tk.LEFT, fill=tk.Y)
         left_panel.pack_propagate(False)
 
-        tk.Label(left_panel, text="ПАРАЛЛЕЛИ", font=self.header_font,
-                 fg=self.accent_amber, bg=self.bg_color).pack(pady=15)
+        tk.Label(left_panel, text="ПАРАЛЛЕЛИ",
+                 font=font.Font(family="Segoe UI", size=14, weight="bold"),
+                 fg=self.text_dim, bg=self.bg_panel).pack(pady=(20, 12), anchor="w", padx=24)
 
-        left_canvas = tk.Canvas(left_panel, bg=self.bg_color, highlightthickness=0)
-        self.left_buttons_frame = tk.Frame(left_canvas, bg=self.bg_color)
-        self.left_buttons_frame.bind("<Configure>",
-                                     lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
-        left_canvas.create_window((0, 0), window=self.left_buttons_frame, anchor="nw")
-        left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.left_buttons_frame = tk.Frame(left_panel, bg=self.bg_panel)
+        self.left_buttons_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
-        right_panel = tk.Frame(main_frame, bg=self.bg_color)
-        right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # --- Вертикальный разделитель ---
+        tk.Frame(main_frame, bg=self.separator_color, width=1).pack(side=tk.LEFT, fill=tk.Y)
 
-        self.right_title = tk.Label(right_panel, text="ВЫБЕРИТЕ ПАРАЛЛЕЛЬ",
-                                    font=self.header_font, fg=self.accent_cyan_bright, bg=self.bg_color)
-        self.right_title.pack(pady=15)
+        # --- Правая панель ---
+        self.right_panel = tk.Frame(main_frame, bg=self.bg_color)
+        self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        right_canvas = tk.Canvas(right_panel, bg=self.bg_color, highlightthickness=0)
-        self.right_classes_frame = tk.Frame(right_canvas, bg=self.bg_color)
-        self.right_classes_frame.bind("<Configure>",
-                                      lambda e: right_canvas.configure(scrollregion=right_canvas.bbox("all")))
-        right_canvas.create_window((0, 0), window=self.right_classes_frame, anchor="nw")
-        right_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.right_title = tk.Label(self.right_panel, text="",
+                                    font=font.Font(family="Segoe UI", size=24, weight="bold"),
+                                    fg=self.accent_amber, bg=self.bg_color,
+                                    anchor="w")
+        self.right_title.pack(pady=(20, 16), padx=30, anchor="w")
 
-        self.choice_font = font.Font(family="Segoe UI", size=20, weight="bold")
+        self.right_classes_frame = tk.Frame(self.right_panel, bg=self.bg_color)
+        self.right_classes_frame.pack(fill=tk.X, padx=30)
+
+        self.choice_font = font.Font(family="Segoe UI", size=18, weight="bold")
+        self.parallel_font = font.Font(family="Segoe UI", size=17, weight="bold")
 
         if self.class_groups:
             self.on_grade_selected(self.class_groups[0])
 
         self.create_footer(f"Всего доступных классов: {len(self.all_classes)}")
         buttons = [
-            ("ВСЁ РАСПИСАНИЕ", self.show_full_schedule),
-            ("К ОБЩЕМУ РАСПИСАНИЮ", self.show_all_classes_schedule),
-            ("ВЫХОД", self.root.quit),
+            ("ОБНОВИТЬ", self.refresh_current),
+            ("SEP", None),
         ]
+        buttons += self._get_nav_trio('selection')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
         self.reset_idle_timer()
 
     def on_grade_selected(self, group):
         self.right_title.config(text=f"{group['name']}")
 
+        # --- Левая колонка: параллели в один столбец ---
         for child in self.left_buttons_frame.winfo_children():
             child.destroy()
-        row, col = 0, 0
+
         for g in self.class_groups:
             active = (g['name'] == group['name'])
             btn = self._make_chip_button(
                 self.left_buttons_frame, g['name'],
                 command=lambda gg=g: self.on_grade_selected(gg),
-                active=active, font_=self.choice_font
+                active=active, font_=self.parallel_font
             )
-            btn.grid(row=row, column=col, padx=8, pady=8, sticky='ew')
-            col += 1
-            if col >= 2:
-                col = 0
-                row += 1
-        for i in range(2):
-            self.left_buttons_frame.grid_columnconfigure(i, weight=1)
+            btn.pack(fill=tk.X, pady=4, ipady=4)
 
+        # --- Правая колонка: классы ---
         for widget in self.right_classes_frame.winfo_children():
             widget.destroy()
+
         cols = 5
         row, col = 0, 0
         for class_name in group['classes']:
@@ -1137,24 +1256,124 @@ class App:
                 command=lambda c=class_name: self.show_class_schedule(c),
                 font_=self.choice_font
             )
-            btn.grid(row=row, column=col, padx=10, pady=10, sticky='nsew')
+            btn.grid(row=row, column=col, padx=6, pady=6, sticky='nsew', ipadx=14, ipady=10)
             col += 1
             if col >= cols:
                 col = 0
                 row += 1
         for i in range(cols):
-            self.right_classes_frame.grid_columnconfigure(i, weight=1)
+            self.right_classes_frame.grid_columnconfigure(i, weight=1, uniform="cls")
 
+        # --- Карточка "СЕЙЧАС В ПАРАЛЛЕЛИ" ---
+        self._render_parallel_current_card(group)
+
+    def _render_parallel_current_card(self, group):
+        """Карточка с текущим уроком каждого класса параллели."""
+        if self._parallel_card and self._parallel_card.winfo_exists():
+            self._parallel_card.destroy()
+
+        card = tk.Frame(self.right_panel, bg=self.bg_panel)
+        card.pack(fill=tk.BOTH, expand=True, padx=30, pady=(24, 20))
+        self._parallel_card = card
+
+        # --- Заголовок ---
+        tk.Label(card, text="СЕЙЧАС В ПАРАЛЛЕЛИ",
+                 font=font.Font(family="Segoe UI", size=13, weight="bold"),
+                 fg=self.text_dim, bg=self.bg_panel).pack(anchor="w", padx=20, pady=(16, 10))
+
+        # --- Строка статуса ---
+        current_lesson, next_lesson, _ = self.get_current_lesson_info()
+        if current_lesson is not None:
+            start, end = self.lesson_times[current_lesson]
+            status_text = f"●  Идёт урок №{current_lesson + 1}  •  {start} — {end}"
+            status_color = self.status_ok
+        elif next_lesson is not None:
+            start, _ = self.lesson_times[next_lesson]
+            status_text = f"●  Перемена  •  следующий урок в {start}"
+            status_color = self.accent_amber
+        else:
+            status_text = "●  Учебный день завершён"
+            status_color = self.text_dim
+
+        tk.Label(card, text=status_text,
+                 font=font.Font(family="Segoe UI", size=18, weight="bold"),
+                 fg=status_color, bg=self.bg_panel).pack(anchor="w", padx=20, pady=(0, 12))
+
+        # --- Список классов и их текущих уроков ---
+        day_schedule = self.rasp_wth_changes.get(self.day_today, {})
+
+        list_frame = tk.Frame(card, bg=self.bg_panel)
+        list_frame.pack(fill=tk.X, padx=20, pady=(0, 16))
+
+        if current_lesson is None:
+            tk.Label(list_frame,
+                     text="Сейчас уроков нет — можно посмотреть всё расписание параллели.",
+                     font=self.data_font, fg=self.text_dim, bg=self.bg_panel).pack(anchor="w")
+        else:
+            for class_name in group['classes']:
+                row = tk.Frame(list_frame, bg=self.bg_panel)
+                row.pack(fill=tk.X, pady=3)
+
+                tk.Label(row, text=class_name, font=self.data_mono,
+                         fg=self.accent_cyan_bright, bg=self.bg_panel,
+                         width=6, anchor="w").pack(side=tk.LEFT)
+
+                if class_name in day_schedule and current_lesson < len(day_schedule[class_name]):
+                    lesson = day_schedule[class_name][current_lesson]
+                    subject = lesson[2]
+                    room = lesson[4]
+                    status = lesson[6]
+
+                    if status == "ОТМЕНЕНО":
+                        subj_color = self.cancelled_fg
+                    elif status == "ИЗМЕНЕНО":
+                        subj_color = self.status_warn
+                    else:
+                        subj_color = self.text_color
+
+                    tk.Label(row, text=subject, font=self.data_font,
+                             fg=subj_color, bg=self.bg_panel,
+                             anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 0))
+
+                    tk.Label(row, text=f"каб. {room}", font=self.data_mono,
+                             fg=self.text_dim, bg=self.bg_panel,
+                             anchor="e").pack(side=tk.RIGHT)
+                else:
+                    tk.Label(row, text="—  нет урока  —", font=self.data_font,
+                             fg=self.text_dim, bg=self.bg_panel,
+                             anchor="w").pack(side=tk.LEFT, padx=(12, 0))
+
+        # --- Кнопка-шорткат ---
+        shortcut_row = tk.Frame(card, bg=self.bg_panel)
+        shortcut_row.pack(fill=tk.X, padx=20, pady=(4, 16))
+
+        self._make_chip_button(
+            shortcut_row,
+            f"→  Общее расписание для {group['name'].lower().replace("-е", "-х").replace("классы", "классов")}",
+            command=lambda g=group: self._open_full_for_group(g),
+            font_=self.button_font
+        ).pack(side=tk.LEFT)
+
+    def _open_full_for_group(self, group):
+        """Прыжок в 'Всё расписание' с уже выбранной параллелью."""
+        try:
+            self.current_group_index = self.class_groups.index(group)
+        except ValueError:
+            self.current_group_index = 0
+        self.show_full_schedule()
+
+    # ---------- ВСЁ РАСПИСАНИЕ ----------
     def show_full_schedule(self):
         self.is_main_screen = False
+        self._current_screen = 'full'
         self.clear_window()
 
         if not self.class_groups:
             self.create_status_bar("Нет данных для отображения")
-            self.create_navigation_buttons([
-                ("НАЗАД", self.show_all_classes_schedule),
-                ("ВЫХОД", self.root.quit),
-            ])
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
+            self.create_navigation_buttons(buttons)
             return
 
         if self.current_group_index >= len(self.class_groups):
@@ -1162,7 +1381,10 @@ class App:
 
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения")
-            self.create_navigation_buttons([("ВЫХОД", self.root.quit)])
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
+            self.create_navigation_buttons(buttons)
             return
 
         current_group = self.class_groups[self.current_group_index]
@@ -1170,10 +1392,10 @@ class App:
 
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
-            self.create_navigation_buttons([
-                ("НАЗАД", self.show_all_classes_schedule),
-                ("ВЫХОД", self.root.quit),
-            ])
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
+            self.create_navigation_buttons(buttons)
             return
 
         day_schedule = self.rasp_wth_changes[current_day]
@@ -1189,10 +1411,10 @@ class App:
 
         if max_lessons == 0:
             self.create_status_bar("Нет уроков для отображения")
-            self.create_navigation_buttons([
-                ("НАЗАД", self.show_all_classes_schedule),
-                ("ВЫХОД", self.root.quit),
-            ])
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
+            self.create_navigation_buttons(buttons)
             return
 
         container = tk.Frame(self.root, bg=self.bg_color)
@@ -1246,16 +1468,19 @@ class App:
                 cell.grid_rowconfigure(0, weight=1)
                 cell.grid_columnconfigure(0, weight=1)
 
-                tk.Label(cell, text=cell_data, font=self.data_font, fg=fg_color,
-                         bg=bg_color, anchor="center", justify="center").grid(
-                    row=0, column=0, sticky='nsew', padx=15, pady=6)
+                if col_idx == 0:
+                    lbl = self._make_class_cell(cell, cell_data, bg_color, fg_color, self.data_font)
+                    lbl.grid(row=0, column=0, sticky='nsew', padx=15, pady=6)
+                else:
+                    tk.Label(cell, text=cell_data, font=self.data_font, fg=fg_color,
+                             bg=bg_color, anchor="center", justify="center").grid(
+                        row=0, column=0, sticky='nsew', padx=15, pady=6)
 
             sep = tk.Frame(table_frame, bg=self.separator_color, height=1)
             sep.grid(row=row_idx, column=0, columnspan=len(headers), sticky='sew')
 
             row_idx += 1
 
-        # Фиксированная ширина первой колонки
         table_frame.columnconfigure(0, weight=0, minsize=220)
         for i in range(1, len(headers)):
             table_frame.columnconfigure(i, weight=1, uniform="full")
@@ -1263,13 +1488,15 @@ class App:
         group_info = f"{self.current_group_index + 1}/{len(self.class_groups)}"
         day_info = f"{self.current_day_index + 1}/{len(self.days_of_week)}"
         self.create_footer(f"День: {current_day}  •  Группа: {current_group['name']}  "
-                           f"•  Страница дня: {day_info}  •  Страница группы: {group_info}")
+                           f"•  Страница дня: {day_info}  •  Страница группы: {group_info}  "
+                           f"•  Кликните на класс, чтобы открыть его расписание")
 
         buttons = [
-            ("ОБЩЕЕ РАСПИСАНИЕ", self.show_all_classes_schedule),
-            ("ВЫБРАТЬ КЛАСС", self.show_class_selection),
-            ("ВЫХОД", self.root.quit)
+            ("ОБНОВИТЬ", self.refresh_current),
+            ("SEP", None),
         ]
+        buttons += self._get_nav_trio('full')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         self.reset_idle_timer()
