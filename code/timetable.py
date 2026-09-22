@@ -61,7 +61,7 @@ class App:
 
         # Пагинация
         self.current_classes_page = 0
-        self.classes_per_page = 7
+        self.classes_per_page = 8
         self.auto_flip_job = None
         self.auto_flip_interval = 15000
 
@@ -139,6 +139,8 @@ class App:
 
     def start_auto_flip(self):
         self.stop_auto_flip()
+        if self.page_info.get("total", 1) <= 1:
+            return
         self.auto_flip_job = self.root.after(self.auto_flip_interval, self.next_classes_page)
 
     def stop_auto_flip(self):
@@ -148,6 +150,15 @@ class App:
 
     def _row_bg(self, index):
         return self.bg_row_even if index % 2 == 0 else self.bg_row_odd
+
+    def _resolve_room(self, subject, room):
+        """Если предмет — физкультура и кабинет пустой/nan — возвращаем 'зал'."""
+        room_str = "" if room is None else str(room).strip()
+        room_is_empty = (room_str == "" or room_str.lower() == "nan")
+        subj_lower = (subject or "").lower()
+        if "физ" in subj_lower and room_is_empty:
+            return "зал"
+        return room_str
 
     # ---------- КЛИКАБЕЛЬНАЯ ЯЧЕЙКА КЛАССА ----------
     def _make_class_cell(self, parent, class_name, bg_color, fg_color, font_):
@@ -499,7 +510,7 @@ class App:
                         lesson_data[0],
                         lesson_data[1],
                         lesson_data[2],
-                        lesson_data[4],
+                        self._resolve_room(lesson_data[2], lesson_data[4]),
                         lesson_data[6],
                         lesson_data[6] == "ОТМЕНЕНО"
                     ))
@@ -515,6 +526,10 @@ class App:
         classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
 
         total = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
+
+        if total <= 1:
+            return
+
         self.current_classes_page = (self.current_classes_page + delta) % total
 
         rows, cls, tp = self._get_page_rows_data(day_schedule, lesson_to_show)
@@ -1110,7 +1125,14 @@ class App:
 
             for row_idx, row_data in enumerate(schedule_to_show, 1):
                 is_cancelled = row_data[6] == "ОТМЕНЕНО"
-                display_data = (row_data[0], row_data[1], row_data[2], row_data[3], row_data[4], row_data[6])
+                display_data = (
+                    row_data[0],
+                    row_data[1],
+                    row_data[2],
+                    row_data[3],
+                    self._resolve_room(row_data[2], row_data[4]),
+                    row_data[6],
+                )
                 row_bg = self.bg_row_even if row_idx % 2 == 1 else self.bg_row_odd
 
                 for col_idx, cell_data in enumerate(display_data):
@@ -1184,7 +1206,6 @@ class App:
         main_frame = tk.Frame(self.root, bg=self.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 15))
 
-        # --- Левая панель: параллели ---
         left_panel = tk.Frame(main_frame, bg=self.bg_panel, width=340)
         left_panel.pack(side=tk.LEFT, fill=tk.Y)
         left_panel.pack_propagate(False)
@@ -1196,10 +1217,8 @@ class App:
         self.left_buttons_frame = tk.Frame(left_panel, bg=self.bg_panel)
         self.left_buttons_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
-        # --- Вертикальный разделитель ---
         tk.Frame(main_frame, bg=self.separator_color, width=1).pack(side=tk.LEFT, fill=tk.Y)
 
-        # --- Правая панель ---
         self.right_panel = tk.Frame(main_frame, bg=self.bg_color)
         self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -1231,7 +1250,6 @@ class App:
     def on_grade_selected(self, group):
         self.right_title.config(text=f"{group['name']}")
 
-        # --- Левая колонка: параллели в один столбец ---
         for child in self.left_buttons_frame.winfo_children():
             child.destroy()
 
@@ -1244,7 +1262,6 @@ class App:
             )
             btn.pack(fill=tk.X, pady=4, ipady=4)
 
-        # --- Правая колонка: классы ---
         for widget in self.right_classes_frame.winfo_children():
             widget.destroy()
 
@@ -1264,11 +1281,9 @@ class App:
         for i in range(cols):
             self.right_classes_frame.grid_columnconfigure(i, weight=1, uniform="cls")
 
-        # --- Карточка "СЕЙЧАС В ПАРАЛЛЕЛИ" ---
         self._render_parallel_current_card(group)
 
     def _render_parallel_current_card(self, group):
-        """Карточка с текущим уроком каждого класса параллели."""
         if self._parallel_card and self._parallel_card.winfo_exists():
             self._parallel_card.destroy()
 
@@ -1332,9 +1347,15 @@ class App:
                              fg=subj_color, bg=self.bg_panel,
                              anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 0))
 
-                    tk.Label(row, text=f"каб. {room}", font=self.data_mono,
-                             fg=self.text_dim, bg=self.bg_panel,
-                             anchor="e").pack(side=tk.RIGHT)
+                    room_display = self._resolve_room(subject, room)
+                    if room_display == "зал":
+                        tk.Label(row, text="зал", font=self.data_font,
+                                 fg=self.text_dim, bg=self.bg_panel,
+                                 anchor="e").pack(side=tk.RIGHT)
+                    else:
+                        tk.Label(row, text=f"каб. {room_display}", font=self.data_mono,
+                                 fg=self.text_dim, bg=self.bg_panel,
+                                 anchor="e").pack(side=tk.RIGHT)
                 else:
                     tk.Label(row, text="—  нет урока  —", font=self.data_font,
                              fg=self.text_dim, bg=self.bg_panel,
@@ -1351,7 +1372,6 @@ class App:
         ).pack(side=tk.LEFT)
 
     def _open_full_for_group(self, group):
-        """Прыжок в 'Всё расписание' с уже выбранной параллелью."""
         try:
             self.current_group_index = self.class_groups.index(group)
         except ValueError:
@@ -1443,7 +1463,9 @@ class App:
             row_data = [class_name]
             for lesson_num in range(1, max_lessons + 1):
                 if (lesson_num - 1) < len(rasp_cur_class):
-                    lesson_info = f"{rasp_cur_class[lesson_num-1][2]}\n{rasp_cur_class[lesson_num-1][4]}"
+                    lesson = rasp_cur_class[lesson_num-1]
+                    resolved_room = self._resolve_room(lesson[2], lesson[4])
+                    lesson_info = f"{lesson[2]}\n{resolved_room}"
                 else:
                     lesson_info = ""
                 row_data.append(lesson_info)
