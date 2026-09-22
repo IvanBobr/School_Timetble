@@ -827,7 +827,7 @@ class App:
 
     def create_navigation_buttons(self, buttons_config):
         button_frame = tk.Frame(self.root, bg=self.bg_color)
-        button_frame.pack(fill=tk.X, padx=30, pady=14)
+        button_frame.pack(fill=tk.X, padx=10, pady=14)
 
         left_items = []
         right_items = []
@@ -868,7 +868,7 @@ class App:
 
     def create_day_navigation_buttons(self):
         day_frame = tk.Frame(self.root, bg=self.bg_color)
-        day_frame.pack(fill=tk.X, padx=30, pady=(0, 6))
+        day_frame.pack(fill=tk.X, padx=10, pady=(0, 6))
         dict_day = {"ПОНЕДЕЛЬНИК": "ПН", "ВТОРНИК": "ВТ", "СРЕДА": "СР",
                     "ЧЕТВЕРГ": "ЧТ", "ПЯТНИЦА": "ПТ", "СУББОТА": "СБ"}
         for i, day in enumerate(self.days_of_week[:len(self.days_of_week) - 1]):
@@ -887,7 +887,7 @@ class App:
 
     def create_group_navigation_buttons(self):
         group_frame = tk.Frame(self.root, bg=self.bg_color)
-        group_frame.pack(fill=tk.X, padx=30, pady=(0, 12))
+        group_frame.pack(fill=tk.X, padx=10, pady=(0, 12))
         for i, group in enumerate(self.class_groups):
             active = (i == self.current_group_index)
             btn = self._make_chip_button(
@@ -986,7 +986,7 @@ class App:
         lesson_to_show = current_lesson if current_lesson is not None else next_lesson
 
         container = tk.Frame(self.root, bg=self.bg_color)
-        container.pack(fill=tk.BOTH, expand=True, padx=30, pady=(0, 12))
+        container.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 12))
 
         canvas = tk.Canvas(container, bg=self.bg_color, highlightthickness=0)
         table_frame = tk.Frame(canvas, bg=self.bg_color)
@@ -1084,7 +1084,7 @@ class App:
         self.create_status_bar(f"Расписание класса {class_name} на текущий день")
 
         table_frame = tk.Frame(self.root, bg=self.bg_color)
-        table_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=(0, 15))
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 15))
 
         headers = ["№ УРОКА", "ВРЕМЯ", "ПРЕДМЕТ", "КЛАСС", "КАБИНЕТ", "СТАТУС"]
         for i, h in enumerate(headers):
@@ -1182,7 +1182,7 @@ class App:
         self.create_status_bar("Выберите параллель, затем класс для просмотра расписания")
 
         main_frame = tk.Frame(self.root, bg=self.bg_color)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=(0, 15))
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 15))
 
         # --- Левая панель: параллели ---
         left_panel = tk.Frame(main_frame, bg=self.bg_panel, width=340)
@@ -1276,12 +1276,10 @@ class App:
         card.pack(fill=tk.BOTH, expand=True, padx=30, pady=(24, 20))
         self._parallel_card = card
 
-        # --- Заголовок ---
         tk.Label(card, text="СЕЙЧАС В ПАРАЛЛЕЛИ",
                  font=font.Font(family="Segoe UI", size=13, weight="bold"),
                  fg=self.text_dim, bg=self.bg_panel).pack(anchor="w", padx=20, pady=(16, 10))
 
-        # --- Строка статуса ---
         current_lesson, next_lesson, _ = self.get_current_lesson_info()
         if current_lesson is not None:
             start, end = self.lesson_times[current_lesson]
@@ -1299,7 +1297,6 @@ class App:
                  font=font.Font(family="Segoe UI", size=18, weight="bold"),
                  fg=status_color, bg=self.bg_panel).pack(anchor="w", padx=20, pady=(0, 12))
 
-        # --- Список классов и их текущих уроков ---
         day_schedule = self.rasp_wth_changes.get(self.day_today, {})
 
         list_frame = tk.Frame(card, bg=self.bg_panel)
@@ -1343,13 +1340,12 @@ class App:
                              fg=self.text_dim, bg=self.bg_panel,
                              anchor="w").pack(side=tk.LEFT, padx=(12, 0))
 
-        # --- Кнопка-шорткат ---
         shortcut_row = tk.Frame(card, bg=self.bg_panel)
         shortcut_row.pack(fill=tk.X, padx=20, pady=(4, 16))
 
         self._make_chip_button(
             shortcut_row,
-            f"-> Общее расписание для {group['name'].lower().replace('е', '-x').replace('классы', 'классов')}",
+            f"→  Общее расписание для {group['name'].lower()}",
             command=lambda g=group: self._open_full_for_group(g),
             font_=self.button_font
         ).pack(side=tk.LEFT)
@@ -1418,7 +1414,7 @@ class App:
             return
 
         container = tk.Frame(self.root, bg=self.bg_color)
-        container.pack(fill=tk.BOTH, expand=True, padx=30, pady=(0, 12))
+        container.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 12))
 
         canvas = tk.Canvas(container, bg=self.bg_color, highlightthickness=0)
         table_frame = tk.Frame(canvas, bg=self.bg_color)
