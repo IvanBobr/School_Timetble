@@ -13,7 +13,6 @@ class App:
         self.root.configure(bg='black')
 
         self.debug_time = None
-
         self._last_lesson_index = None
         self._last_next_index = None
 
@@ -24,18 +23,32 @@ class App:
         self.cancelled_bg = '#DC143C'
         self.cancelled_fg = '#FFFFFF'
 
-        # Шрифты
-        self.title_font = font.Font(family="Courier", size=36, weight="bold")
-        self.header_font = font.Font(family="Courier", size=24, weight="bold")
-        self.data_font = font.Font(family="Courier", size=18)
-        self.small_font = font.Font(family="Courier", size=14)
-        self.button_font = font.Font(family="Courier", size=16, weight="bold")
+        # Основной шрифт — Verdana
+        FONT = "Verdana"
 
-        # Автоперелистывание в "текущих уроках"
-        self.current_classes_page = 0       # текущая страница
-        self.classes_per_page = 10          # сколько классов на странице
-        self.auto_flip_job = None           # идентификатор таймера
-        self.auto_flip_interval = 15000     # 15 секунд (в миллисекундах)
+        self.title_font  = font.Font(family=FONT, size=42, weight="bold")
+        self.header_font = font.Font(family=FONT, size=26, weight="bold")
+        self.data_font   = font.Font(family=FONT, size=22)
+        self.small_font  = font.Font(family=FONT, size=15)
+        self.button_font = font.Font(family=FONT, size=18, weight="bold")
+
+        # Пагинация
+        self.current_classes_page = 0
+        self.classes_per_page = 8
+        self.auto_flip_job = None
+        self.auto_flip_interval = 15000
+
+        # Анимация flip
+        self.flip_jobs = []
+        self.is_animating = False
+        self.row_height_px = 88
+
+        # Ссылки для перерисовки
+        self.table_rows = []
+        self.rows_container = None
+        self.footer_label = None
+        self.page_info = {"current": 1, "total": 1, "classes_count": 0, "day": ""}
+        self.current_page_data = []
 
         # Время уроков
         self.lesson_times = [
@@ -49,12 +62,10 @@ class App:
             ("15:50", "16:35")
         ]
 
-        # Дни недели
         self.days_of_week = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА", "ВОСКРЕСЕНЬЕ"]
         weekday_index = self.get_time_now().weekday()
         self.day_today = self.days_of_week[weekday_index % 6]
 
-         # --- Устанавливаем начальные значения для сравнения в update_clock ---
         self._last_lesson_index, self._last_next_index, _ = self.get_current_lesson_info()
 
         self.data = download_fromServer.fetch_schedule()
@@ -66,20 +77,10 @@ class App:
             self.data = download_fromServer.load_schedule_from_cache()
             if self.data is None:
                 self.data = {
-                    "fromExcel": {
-                        "sp_classes": [],
-                        "sp_rooms": [],
-                        "sp_subjects": [],
-                        "schedule": {}
-                    },
-                    "fromWord": {
-                        "replace": [],
-                        "skip": [],
-                        "day": ""
-                    }
+                    "fromExcel": {"sp_classes": [], "sp_rooms": [], "sp_subjects": [], "schedule": {}},
+                    "fromWord": {"replace": [], "skip": [], "day": ""}
                 }
                 print("No cached data available, using empty schedule")
-
 
         self.rasp_wth_changes = self.make_rasp_wth_changes()
 
@@ -93,153 +94,426 @@ class App:
         self.current_class = None
 
         self.clock_job = None
-
         self.idle_timer_id = None
         self.is_main_screen = False
 
         self.setup_window()
         self.setup_idle_timer()
         self.show_all_classes_schedule()
-        # Запоминаем текущий урок, чтобы избежать лишней перерисовки через секунду
-        # self._last_lesson_index, self._last_next_index, _ = self.get_current_lesson_info()
-        self.root.mainloop()   
+        self.root.mainloop()
 
+    # ---------- БАЗОВЫЕ МЕТОДЫ ----------
     def get_time_now(self):
         if self.debug_time:
             return self.debug_time
         return datetime.now()
 
     def start_auto_flip(self):
-        """Старт перелистывания страниц"""
         self.stop_auto_flip()
         self.auto_flip_job = self.root.after(self.auto_flip_interval, self.next_classes_page)
 
     def stop_auto_flip(self):
-        """Остановка авто перелистывания"""
         if self.auto_flip_job:
             self.root.after_cancel(self.auto_flip_job)
             self.auto_flip_job = None
 
+    # ---------- FLIP-АНИМАЦИЯ ----------
+    def _prepare_cells(self, row_data):
+        """row_data = (class_name, number, time, subject, room, status, is_cancelled)"""
+        class_name, number, time_, subject, room, status, is_cancelled = row_data
+        cells = (class_name, number, time_, subject, room, status)
+        result = []
+        for col_idx, cell_data in enumerate(cells):
+            if is_cancelled:
+                bg = self.cancelled_bg
+                if col_idx == 5:
+                    fg = '#FFFFFF'
+                elif col_idx in [0, 2]:
+                    fg = '#00FFFF'
+                else:
+                    fg = self.cancelled_fg
+            else:
+                bg = self.bg_color
+                if col_idx == 5:
+                    if cell_data == "ИЗМЕНЕНО":
+                        fg = self.warning_color
+                    elif cell_data == "ОТМЕНЕНО":
+                        fg = '#FF6666'
+                    else:
+                        fg = '#00FF00'
+                elif col_idx in [0, 2]:
+                    fg = self.text_color
+                else:
+                    fg = '#FFFFFF'
+            result.append((cell_data, bg, fg))
+        return result
 
-    def next_classes_page(self):
-        if not self.is_main_screen:
+    def _create_row_frame(self, parent, row_data, index):
+        row_frame = tk.Frame(parent, bg=self.bg_color)
+        row_frame.place(x=0, y=index * self.row_height_px, relwidth=1.0, height=self.row_height_px)
+        row_frame.pack_propagate(False)
+
+        for i in range(6):
+            row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
+
+        for i, (text, bg, fg) in enumerate(self._prepare_cells(row_data)):
+            lbl = tk.Label(row_frame, text=text, font=self.data_font,
+                        fg=fg, bg=bg, padx=10, pady=12, anchor="center", justify="center")
+            lbl.grid(row=0, column=i, sticky="nsew")
+        return row_frame
+
+    def _replace_row_content(self, row_frame, row_data):
+        for w in row_frame.winfo_children():
+            w.destroy()
+        for i in range(6):
+            row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
+        for i, (text, bg, fg) in enumerate(self._prepare_cells(row_data)):
+            lbl = tk.Label(row_frame, text=text, font=self.data_font,
+                        fg=fg, bg=bg, padx=10, pady=12, anchor="center", justify="center")
+            lbl.grid(row=0, column=i, sticky="nsew")
+
+    def _cancel_flip_jobs(self):
+        for job in self.flip_jobs:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        self.flip_jobs = []
+
+    def _flip_single_row(self, index, new_row_data, on_done=None):
+        if index >= len(self.table_rows):
+            if on_done:
+                on_done()
             return
-        # Получаем количество классов с уроком на текущем слоте
+        row_frame = self.table_rows[index]
+        if not row_frame.winfo_exists():
+            if on_done:
+                on_done()
+            return
+
+        base_y = index * self.row_height_px
+        base_h = self.row_height_px
+        mid_h = 3
+        half_duration = 110
+        steps = 8
+        step_ms = max(8, half_duration // steps)
+
+        def first_half(step=0):
+            if not row_frame.winfo_exists():
+                if on_done:
+                    on_done()
+                return
+            if step > steps:
+                self._replace_row_content(row_frame, new_row_data)
+                second_half(0)
+                return
+            progress = step / steps
+            eased = 1 - (1 - progress) ** 2
+            cur_h = base_h - (base_h - mid_h) * eased
+            cur_y = base_y + (base_h - cur_h) / 2
+            try:
+                row_frame.place_configure(y=cur_y, height=cur_h)
+            except Exception:
+                pass
+            job = self.root.after(step_ms, lambda: first_half(step + 1))
+            self.flip_jobs.append(job)
+
+        def second_half(step=0):
+            if not row_frame.winfo_exists():
+                if on_done:
+                    on_done()
+                return
+            if step > steps:
+                try:
+                    row_frame.place_configure(y=base_y, height=base_h)
+                except Exception:
+                    pass
+                if on_done:
+                    on_done()
+                return
+            progress = step / steps
+            eased = progress ** 2
+            cur_h = mid_h + (base_h - mid_h) * eased
+            cur_y = base_y + (base_h - cur_h) / 2
+            try:
+                row_frame.place_configure(y=cur_y, height=cur_h)
+            except Exception:
+                pass
+            job = self.root.after(step_ms, lambda: second_half(step + 1))
+            self.flip_jobs.append(job)
+
+        first_half(0)
+
+    def _collapse_row(self, index):
+        if index >= len(self.table_rows):
+            return
+        row_frame = self.table_rows[index]
+        if not row_frame.winfo_exists():
+            return
+
+        base_y = index * self.row_height_px
+        base_h = self.row_height_px
+        steps = 10
+        step_ms = 25
+
+        def step(i=0):
+            if not row_frame.winfo_exists():
+                return
+            if i > steps:
+                try:
+                    row_frame.destroy()
+                except Exception:
+                    pass
+                return
+            progress = i / steps
+            eased = 1 - (1 - progress) ** 2
+            cur_h = base_h * (1 - eased)
+            cur_y = base_y + (base_h - cur_h) / 2
+            try:
+                row_frame.place_configure(y=cur_y, height=cur_h)
+            except Exception:
+                pass
+            job = self.root.after(step_ms, lambda: step(i + 1))
+            self.flip_jobs.append(job)
+
+        step(0)
+
+    def _appear_row(self, index, new_row_data):
+        if index >= len(self.table_rows):
+            row_frame = tk.Frame(self.rows_container, bg=self.bg_color)
+            row_frame.place(x=0, y=index * self.row_height_px, relwidth=1.0, height=0)
+            row_frame.pack_propagate(False)
+            self.table_rows.append(row_frame)
+        else:
+            row_frame = self.table_rows[index]
+
+        for w in row_frame.winfo_children():
+            w.destroy()
+        for i in range(6):
+            row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
+        for i, (text, bg, fg) in enumerate(self._prepare_cells(new_row_data)):
+            lbl = tk.Label(row_frame, text=text, font=self.data_font,
+                        fg=fg, bg=bg, padx=10, pady=12, anchor="center", justify="center")
+            lbl.grid(row=0, column=i, sticky="nsew")
+
+        base_y = index * self.row_height_px
+        target_h = self.row_height_px
+        steps = 8
+        step_ms = 18
+
+        def step(i=0):
+            if not row_frame.winfo_exists():
+                return
+            if i > steps:
+                try:
+                    row_frame.place_configure(y=base_y, height=target_h)
+                except Exception:
+                    pass
+                return
+            progress = i / steps
+            eased = progress ** 2
+            cur_h = target_h * eased
+            cur_y = base_y + (target_h - cur_h) / 2
+            try:
+                row_frame.place_configure(y=cur_y, height=cur_h)
+            except Exception:
+                pass
+            job = self.root.after(step_ms, lambda: step(i + 1))
+            self.flip_jobs.append(job)
+
+        step(0)
+
+    def _animate_page_change(self, new_rows_data):
+        if self.is_animating:
+            return
+        self.is_animating = True
+        self._cancel_flip_jobs()
+
+        old_count = len(self.table_rows)
+        new_count = len(new_rows_data)
+
+        delay = 0
+        delay_step = 45
+        common = min(old_count, new_count)
+
+        for i in range(common):
+            self.root.after(delay, lambda idx=i, data=new_rows_data[i]: self._flip_single_row(idx, data))
+            delay += delay_step
+
+        for i in range(old_count, new_count):
+            self.root.after(delay, lambda idx=i, data=new_rows_data[i]: self._appear_row(idx, data))
+            delay += delay_step
+
+        for i in range(new_count, old_count):
+            self.root.after(delay, lambda idx=i: self._collapse_row(idx))
+            delay += delay_step
+
+        self.current_page_data = new_rows_data
+        total_ms = delay + 350
+        self.root.after(total_ms, self._on_flip_finished)
+
+    def _on_flip_finished(self):
+        self.is_animating = False
+        self.table_rows = [r for r in self.table_rows if r.winfo_exists()]
+        for i, r in enumerate(self.table_rows):
+            try:
+                r.place_configure(y=i * self.row_height_px, height=self.row_height_px, relwidth=1.0, x=0)
+            except Exception:
+                pass
+        self._update_footer()
+        self.start_auto_flip()
+
+    def _update_footer(self):
+        if not self.footer_label or not self.footer_label.winfo_exists():
+            return
+        pi = self.page_info
+        status_text = pi.get("status_text", "")
+        self.footer_label.config(
+            text=f"Статус: {status_text} | Страница: {pi['current']}/{pi['total']} | "
+                 f"Классов с уроком: {pi['classes_count']} | День: {pi['day']}"
+        )
+
+    def _get_page_rows_data(self, day_schedule, lesson_to_show):
+        classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
+        total_page = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
+        if self.current_classes_page >= total_page:
+            self.current_classes_page = 0
+
+        start_index = self.current_classes_page * self.classes_per_page
+        end_index = start_index + self.classes_per_page
+        page_classes = classes_with_lesson[start_index:end_index]
+
+        rows = []
+        for class_name in page_classes:
+            if class_name in day_schedule:
+                lessons = day_schedule[class_name]
+                if lesson_to_show is not None and lesson_to_show < len(lessons):
+                    lesson_data = lessons[lesson_to_show]
+                    rows.append((
+                        class_name,
+                        lesson_data[0],
+                        lesson_data[1],
+                        lesson_data[2],
+                        lesson_data[4],
+                        lesson_data[6],
+                        lesson_data[6] == "ОТМЕНЕНО"
+                    ))
+        return rows, classes_with_lesson, total_page
+
+    # ---------- ПАГИНАЦИЯ ----------
+    def _go_to_page(self, delta):
+        if self.is_animating:
+            return
         current_lesson, next_lesson, _ = self.get_current_lesson_info()
         lesson_to_show = current_lesson if current_lesson is not None else next_lesson
         day_schedule = self.rasp_wth_changes.get(self.day_today, {})
         classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
 
-        total_pages = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
-        self.current_classes_page = (self.current_classes_page + 1) % total_pages
-        self.show_all_classes_schedule()
+        total = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
+        self.current_classes_page = (self.current_classes_page + delta) % total
 
+        rows, cls, tp = self._get_page_rows_data(day_schedule, lesson_to_show)
+
+        status_text = self._get_status_text()
+        self.page_info = {
+            "current": self.current_classes_page + 1,
+            "total": tp,
+            "classes_count": len(cls),
+            "day": self.day_today,
+            "status_text": status_text
+        }
+
+        self._animate_page_change(rows)
+
+    def next_classes_page(self):
+        if not self.is_main_screen:
+            return
+        self._go_to_page(+1)
+
+    def prev_classes_page(self):
+        if not self.is_main_screen:
+            return
+        self._go_to_page(-1)
+
+    def next_classes_page_manual(self):
+        if not self.is_main_screen:
+            return
+        self._go_to_page(+1)
+
+    # ---------- ЛОГИКА ----------
     def create_class_groups(self):
-        """Создание групп классов для постраничного просмотра"""
         if not self.all_classes:
             return [{'name': '5-е классы', 'classes': []}]
-
         groups = {}
-
         for class_name in self.all_classes:
-            # Извлекаем номер класса (первая цифра)
             match = re.match(r'^(\d+)', class_name)
             if match:
                 grade = match.group(1)
                 if grade not in groups:
                     groups[grade] = []
                 groups[grade].append(class_name)
-
-        # Сортируем группы по номеру класса
         sorted_groups = []
         for grade in sorted(groups.keys(), key=int):
             sorted_groups.append({
                 'name': f'{grade}-е классы',
                 'classes': sorted(groups[grade])
             })
-
-        # Если группы не создались, создаем одну группу со всеми классами
         if not sorted_groups:
-            sorted_groups.append({
-                'name': 'Все классы',
-                'classes': self.all_classes
-            })
-
+            sorted_groups.append({'name': 'Все классы', 'classes': self.all_classes})
         return sorted_groups
 
     def parse_day_month(self, date_str):
         if not date_str or " " not in date_str:
-            return None   # или вернуть None, чтобы затем не применять изменения
-
+            return None
         month_map = {
             'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4,
             'мая': 5, 'июня': 6, 'июля': 7, 'августа': 8,
             'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
         }
-        
         day_str, month_str = date_str.split()
         day = int(day_str)
         month = month_map[month_str.lower()]
-        year = self.get_time_now().date().year  # берем текущий год
-        
+        year = self.get_time_now().date().year
         return date(year, month, day)
 
     def make_rasp_wth_changes(self):
-        # Проверка наличия данных
-        if (not self.data or
-            "fromExcel" not in self.data or
-            "schedule" not in self.data["fromExcel"] or
-            "fromWord" not in self.data):
+        if (not self.data or "fromExcel" not in self.data or
+            "schedule" not in self.data["fromExcel"] or "fromWord" not in self.data):
             return {}
-
         data_return = self.data["fromExcel"]["schedule"]
         day_str = self.data["fromWord"].get("day", "")
-
-        # Если дата не указана или не парсится – не применяем изменения
         if not day_str or " " not in day_str:
             return data_return
-
         date_changes = self.parse_day_month(day_str)
         if date_changes is None:
             return data_return
-
         today = self.get_time_now().date()
         print(f"Date from changes: {date_changes}, today: {today}")
-
-        # Применяем изменения только если дата совпадает
         if date_changes == today:
             data_replace = self.data["fromWord"]["replace"]
             data_skip = self.data["fromWord"]["skip"]
             print("Applying changes...")
-
             for change in data_replace:
                 class_torepl = change[3]
                 num_torepl = change[0]
-                if (self.day_today in data_return and
-                    class_torepl in data_return[self.day_today]):
+                if (self.day_today in data_return and class_torepl in data_return[self.day_today]):
                     if num_torepl - 1 < len(data_return[self.day_today][class_torepl]):
                         data_return[self.day_today][class_torepl][num_torepl - 1] = change
                     else:
                         data_return[self.day_today][class_torepl].append(change)
-
             for change in data_skip:
                 class_torepl = change[0]
                 num_torepl = change[1]
-                if (self.day_today in data_return and
-                    class_torepl in data_return[self.day_today] and
+                if (self.day_today in data_return and class_torepl in data_return[self.day_today] and
                     num_torepl - 1 < len(data_return[self.day_today][class_torepl])):
                     data_return[self.day_today][class_torepl][num_torepl - 1][2] = '-'
                     data_return[self.day_today][class_torepl][num_torepl - 1][4] = '-'
                     data_return[self.day_today][class_torepl][num_torepl - 1][5] = '-'
                     data_return[self.day_today][class_torepl][num_torepl - 1][6] = 'ОТМЕНЕНО'
-
         return data_return
 
     def open_debug_dialog(self):
-        """Открыть окно ввода даты и времени для debug-режима."""
         from tkinter import simpledialog
-
-        # Пример: ввод в формате "2026-09-22 13:55"
         default = self.debug_time.strftime("%Y-%m-%d %H:%M") if self.debug_time else datetime.now().strftime("%Y-%m-%d %H:%M")
         answer = simpledialog.askstring(
             "Debug: установить дату и время",
@@ -247,7 +521,7 @@ class App:
             initialvalue=default
         )
         if answer is None:
-            return  # отмена
+            return
         answer = answer.strip()
         if answer == "":
             self.debug_time = None
@@ -260,8 +534,6 @@ class App:
                 from tkinter import messagebox
                 messagebox.showerror("Ошибка", "Неверный формат. Используйте YYYY-MM-DD HH:MM")
                 return
-
-        # Обновляем день недели по debug-времени
         weekday_index = self.get_time_now().weekday()
         if weekday_index == 6:
             from tkinter import messagebox
@@ -269,16 +541,11 @@ class App:
             self.day_today = self.days_of_week[0]
         else:
             self.day_today = self.days_of_week[weekday_index % 6]
-
-        # Сбрасываем страницу текущих уроков
         self.current_classes_page = 0
-
-        # Пересобираем расписание и перерисовываем
         self.rasp_wth_changes = self.make_rasp_wth_changes()
         self.show_all_classes_schedule()
 
     def get_classes_with_lesson(self, day_schedule, lesson_idx):
-        """Возвращает список классов, у которых есть урок в данное время."""
         if lesson_idx is None:
             return []
         result = []
@@ -290,175 +557,98 @@ class App:
         return result
 
     def setup_window(self):
-        """Настройка главного окна"""
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-
-        # Используем почти весь экран
         window_width = int(screen_width * 0.95)
         window_height = int(screen_height * 0.95)
-
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
-
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
         self.root.resizable(True, True)
-
-        # Горячие клавиши
         self.root.bind('<F11>', lambda e: self.root.attributes('-fullscreen',
                                                                not self.root.attributes('-fullscreen')))
         self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
-        # Ctrl+Shift+D — debug-режим (установка даты и времени)
         self.root.bind('<Control-Shift-D>', lambda e: self.open_debug_dialog())
         self.root.bind('<Control-Shift-d>', lambda e: self.open_debug_dialog())
-        self.root.bind('<F12>', lambda e: self.open_debug_dialog())               # универсальная
+        self.root.bind('<F12>', lambda e: self.open_debug_dialog())
 
     def clear_window(self):
-        """Очистка окна"""
-        # Отменяем таймер обновления часов
         self.stop_auto_flip()
+        self._cancel_flip_jobs()
+        self.is_animating = False
         self.root.unbind_all("<MouseWheel>")
         self.root.unbind_all("<Button-4>")
         self.root.unbind_all("<Button-5>")
-
         if hasattr(self, 'clock_job') and self.clock_job:
             self.root.after_cancel(self.clock_job)
             self.clock_job = None
-
-        # Удаляем все виджеты
         for widget in self.root.winfo_children():
             widget.destroy()
+        self.table_rows = []
+        self.rows_container = None
+        self.footer_label = None
 
     def create_header(self, title):
-        """Создание заголовка окна"""
         header_frame = tk.Frame(self.root, bg='black')
         header_frame.pack(fill=tk.X, padx=20, pady=10)
-
-        # Заголовок
-        title_label = tk.Label(header_frame,
-                               text=title,
-                               font=self.title_font,
-                               fg=self.highlight_color,
-                               bg='black')
-        title_label.pack(side=tk.LEFT)
-
-        # Часы
-        clock_color = '#FF3300' if self.debug_time else self.text_color # КРАСНЫЕ ПРИ DEBUG
-        self.clock_label = tk.Label(header_frame,
-                                    font=self.title_font,
-                                    fg=clock_color,
-                                    bg='black')
-        
+        tk.Label(header_frame, text=title, font=self.title_font, fg=self.highlight_color, bg='black').pack(side=tk.LEFT)
+        clock_color = '#FF3300' if self.debug_time else self.text_color
+        self.clock_label = tk.Label(header_frame, font=self.title_font, fg=clock_color, bg='black')
         self.clock_label.pack(side=tk.RIGHT)
-
-        # Обновление времени
         self.update_clock()
-
         return header_frame
 
     def create_status_bar(self, text):
-        """Создание информационной строки"""
         info_frame = tk.Frame(self.root, bg='#001122', height=60)
         info_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
         info_frame.pack_propagate(False)
-
-        info_label = tk.Label(info_frame,
-                              text=text,
-                              font=self.data_font,
-                              fg=self.highlight_color,
-                              bg='#001122')
-        info_label.pack(pady=15)
-
+        tk.Label(info_frame, text=text, font=self.data_font, fg=self.highlight_color, bg='#001122').pack(pady=15)
         return info_frame
 
     def create_footer(self, text):
-        """Создание нижней информационной строки"""
         info_frame = tk.Frame(self.root, bg='#002200', height=40)
         info_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
         info_frame.pack_propagate(False)
-
-        info_label = tk.Label(info_frame,
-                              text=text,
-                              font=self.small_font,
-                              fg='#00FF00',
-                              bg='#002200')
-        info_label.pack(pady=8)
-
+        self.footer_label = tk.Label(info_frame, text=text, font=self.small_font, fg='#00FF00', bg='#002200')
+        self.footer_label.pack(pady=8)
         return info_frame
 
     def create_navigation_buttons(self, buttons_config):
-        """Создание панели навигационных кнопок"""
         button_frame = tk.Frame(self.root, bg='black')
         button_frame.pack(fill=tk.X, padx=20, pady=15)
-
         for text, command in buttons_config:
-            btn = tk.Button(button_frame,
-                            text=text,
-                            font=self.button_font,
-                            bg='#003300',
-                            fg='white',
-                            activebackground='#00AA00',
-                            activeforeground='white',
-                            relief='raised',
-                            borderwidth=4,
-                            padx=25,
-                            pady=15,
-                            command=command)
+            btn = tk.Button(button_frame, text=text, font=self.button_font,
+                            bg='#003300', fg='white', activebackground='#00AA00', activeforeground='white',
+                            relief='raised', borderwidth=4, padx=25, pady=15, command=command)
             btn.pack(side=tk.LEFT, padx=15)
-
         return button_frame
 
     def create_day_navigation_buttons(self):
-        """Создание кнопок для навигации по дням недели"""
         day_frame = tk.Frame(self.root, bg='black')
         day_frame.pack(fill=tk.X, padx=20, pady=10)
         dict_day = {"ПОНЕДЕЛЬНИК": "ПН", "ВТОРНИК": "ВТ", "СРЕДА": "СР", "ЧЕТВЕРГ": "ЧТ", "ПЯТНИЦА": "ПТ", "СУББОТА": "СБ"}
         for i, day in enumerate(self.days_of_week[:len(self.days_of_week) - 1]):
-            day_btn = tk.Button(day_frame,
-                                text=dict_day[day],
-                                font=self.button_font,
-                                bg='#003366',
-                                fg='white',
-                                activebackground='#0066CC',
-                                activeforeground='white',
-                                relief='raised',
-                                borderwidth=3,
-                                padx=15,
-                                pady=10,
-                                command=lambda idx=i: self.set_day_and_refresh(idx))
-            day_btn.pack(side=tk.LEFT, padx=5)
-
+            tk.Button(day_frame, text=dict_day[day], font=self.button_font,
+                      bg='#003366', fg='white', activebackground='#0066CC', activeforeground='white',
+                      relief='raised', borderwidth=3, padx=15, pady=10,
+                      command=lambda idx=i: self.set_day_and_refresh(idx)).pack(side=tk.LEFT, padx=5)
         return day_frame
 
     def set_day_and_refresh(self, day_index):
-        """Установить день и обновить отображение"""
         self.current_day_index = day_index
         self.show_full_schedule()
 
     def create_group_navigation_buttons(self):
-        """Создание кнопок для навигации по группам классов"""
         group_frame = tk.Frame(self.root, bg='black')
         group_frame.pack(fill=tk.X, padx=20, pady=10)
-
         for i, group in enumerate(self.class_groups):
-            group_btn = tk.Button(group_frame,
-                                  text=group['name'],
-                                  font=self.button_font,
-                                  bg='#330066',
-                                  fg='white',
-                                  activebackground='#6600CC',
-                                  activeforeground='white',
-                                  relief='raised',
-                                  borderwidth=3,
-                                  padx=15,
-                                  pady=10,
-                                  command=lambda idx=i: self.set_group_and_refresh(idx))
-            group_btn.pack(side=tk.LEFT, padx=5)
-
+            tk.Button(group_frame, text=group['name'], font=self.button_font,
+                      bg='#330066', fg='white', activebackground='#6600CC', activeforeground='white',
+                      relief='raised', borderwidth=3, padx=15, pady=10,
+                      command=lambda idx=i: self.set_group_and_refresh(idx)).pack(side=tk.LEFT, padx=5)
         return group_frame
 
     def set_group_and_refresh(self, group_index):
-        """Установить группу и обновить отображение"""
         self.current_group_index = group_index
         self.show_full_schedule()
 
@@ -474,7 +664,7 @@ class App:
                 elif new_current != self._last_lesson_index or new_next != self._last_next_index:
                     self._last_lesson_index = new_current
                     self._last_next_index = new_next
-                    self.current_classes_page = 0   # сброс на первую страницу при смене урока
+                    self.current_classes_page = 0
                     self.show_all_classes_schedule()
                     return
                 self.clock_job = self.root.after(1000, self.update_clock)
@@ -482,55 +672,36 @@ class App:
             print(f"[Clock Error] {e}")
 
     def get_current_lesson_info(self):
-        """Получение информации о текущем или следующем уроке"""
         now = self.get_time_now()
-
-        # Находим текущий урок или следующую переменную
         current_lesson = None
         next_lesson = None
         is_break = True
-
         for i, (start_time, end_time) in enumerate(self.lesson_times):
             start_dt = datetime.strptime(start_time, "%H:%M")
             end_dt = datetime.strptime(end_time, "%H:%M")
-
-            # Сравниваем время
             if start_dt.time() <= now.time() <= end_dt.time():
-                current_lesson = i  # Текущий урок
+                current_lesson = i
                 is_break = False
                 break
             elif now.time() < start_dt.time():
-                next_lesson = i  # Следующий урок
+                next_lesson = i
                 is_break = True
                 break
-
-        # Если время после последнего урока
         if current_lesson is None and next_lesson is None:
             is_break = True
-
         return current_lesson, next_lesson, is_break
 
-    def prev_classes_page(self):
+    def _get_status_text(self):
         current_lesson, next_lesson, _ = self.get_current_lesson_info()
-        lesson_to_show = current_lesson if current_lesson is not None else next_lesson
-        day_schedule = self.rasp_wth_changes.get(self.day_today, {})
-        classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
+        if current_lesson is not None:
+            start_time, end_time = self.lesson_times[current_lesson]
+            return f"Сейчас идёт урок ({start_time}-{end_time})"
+        elif next_lesson is not None:
+            start_time, end_time = self.lesson_times[next_lesson]
+            return f"Сейчас перемена, следующий урок в {start_time}"
+        return "Учебный день завершён"
 
-        total = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
-        self.current_classes_page = (self.current_classes_page - 1) % total
-        self.show_all_classes_schedule()
-
-
-    def next_classes_page_manual(self):
-        current_lesson, next_lesson, _ = self.get_current_lesson_info()
-        lesson_to_show = current_lesson if current_lesson is not None else next_lesson
-        day_schedule = self.rasp_wth_changes.get(self.day_today, {})
-        classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
-
-        total = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
-        self.current_classes_page = (self.current_classes_page + 1) % total
-        self.show_all_classes_schedule()
-
+    # ---------- ГЛАВНЫЙ ЭКРАН ----------
     def show_all_classes_schedule(self):
         self.is_main_screen = True
         self.reset_idle_timer()
@@ -538,7 +709,6 @@ class App:
         self.create_header("✈ ТЕКУЩИЕ УРОКИ - ВСЕ КЛАССЫ ✈")
         self.create_status_bar("Информационная система школьного расписания")
 
-        # Проверка наличия данных
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения (проверьте подключение к серверу)")
             self.create_navigation_buttons([("ВЫХОД", self.root.quit)])
@@ -551,8 +721,7 @@ class App:
             return
 
         day_schedule = self.rasp_wth_changes[current_day]
-
-        current_lesson, next_lesson, is_break = self.get_current_lesson_info()
+        current_lesson, next_lesson, _ = self.get_current_lesson_info()
         lesson_to_show = current_lesson if current_lesson is not None else next_lesson
 
         container = tk.Frame(self.root, bg=self.bg_color)
@@ -561,89 +730,58 @@ class App:
         canvas = tk.Canvas(container, bg=self.bg_color, highlightthickness=0)
         scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
         table_frame = tk.Frame(canvas, bg=self.bg_color)
+
         table_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=table_frame, anchor="nw")
+        table_window = canvas.create_window((0, 0), window=table_frame, anchor="nw")
+
+        def _stretch_table(event):
+            canvas.itemconfig(table_window, width=event.width)
+        canvas.bind("<Configure>", _stretch_table)
+
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+
         headers = ["КЛАСС", "№ УРОКА", "ВРЕМЯ", "ПРЕДМЕТ", "КАБИНЕТ", "СТАТУС"]
-        for i, header in enumerate(headers):
-            header_label = tk.Label(table_frame,
-                                    text=header,
-                                    font=self.header_font,
-                                    fg=self.highlight_color,
-                                    bg=self.bg_color,
-                                    padx=20,
-                                    pady=15)
-            header_label.grid(row=0, column=i, sticky='ew')
+        header_frame = tk.Frame(table_frame, bg=self.bg_color)
+        header_frame.pack(fill=tk.X)
 
-        row_idx = 1
+        for i in range(len(headers)):
+            header_frame.grid_columnconfigure(i, weight=1, uniform="cols")
 
-        # Только классы, у которых реально есть урок на этом слоте
-        classes_with_lesson = self.get_classes_with_lesson(day_schedule, lesson_to_show)
+        for i, h in enumerate(headers):
+            lbl = tk.Label(header_frame, text=h, font=self.header_font,
+                        fg=self.highlight_color, bg=self.bg_color,
+                        padx=10, pady=15,
+                        anchor="center", justify="center")
+            lbl.grid(row=0, column=i, sticky="nsew")
 
-        total_page = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
+        self.rows_container = tk.Frame(table_frame, bg=self.bg_color)
+        self.rows_container.pack(fill=tk.BOTH, expand=True)
+        rows, classes_with_lesson, total_page = self._get_page_rows_data(day_schedule, lesson_to_show)
+        self.rows_container.configure(height=len(rows) * self.row_height_px)
+        self.rows_container.pack_propagate(False)
 
-        # Клампим текущую страницу, если она вышла за пределы
-        if self.current_classes_page >= total_page:
-            self.current_classes_page = 0
+        self.table_rows = []
+        for i, row_data in enumerate(rows):
+            self.table_rows.append(self._create_row_frame(self.rows_container, row_data, i))
+        self.current_page_data = rows
 
-        start_index = self.current_classes_page * self.classes_per_page
-        end_index = start_index + self.classes_per_page
-        current_page_classes = classes_with_lesson[start_index : end_index]
+        status_text = self._get_status_text()
+        self.page_info = {
+            "current": self.current_classes_page + 1,
+            "total": total_page,
+            "classes_count": len(classes_with_lesson),
+            "day": current_day,
+            "status_text": status_text
+        }
 
-        for class_name in current_page_classes:
-            if class_name in day_schedule:
-                lessons = day_schedule[class_name]
-                if lesson_to_show is not None and lesson_to_show < len(lessons):
-                    lesson_data = lessons[lesson_to_show]
-                    full_row_data = (
-                        class_name,
-                        lesson_data[0],   # номер урока
-                        lesson_data[1],   # время
-                        lesson_data[2],   # предмет
-                        lesson_data[4],   # кабинет
-                        lesson_data[6]    # статус
-                    )
-
-                    is_cancelled = lesson_data[6] == "ОТМЕНЕНО"
-                    for col_idx, cell_data in enumerate(full_row_data):
-                        if is_cancelled:
-                            bg_color = self.cancelled_bg
-                            fg_color = '#FFFFFF' if col_idx == 5 else ('#00FFFF' if col_idx in [0, 2] else self.cancelled_fg)
-                        else:
-                            bg_color = self.bg_color
-                            if col_idx == 5:
-                                fg_color = self.warning_color if cell_data == "ИЗМЕНЕНО" else ('#FF6666' if cell_data == "ОТМЕНЕНО" else '#00FF00')
-                            elif col_idx in [0, 2]:
-                                fg_color = self.text_color
-                            else:
-                                fg_color = '#FFFFFF'
-
-                        cell_label = tk.Label(table_frame,
-                                            text=cell_data,
-                                            font=self.data_font,
-                                            fg=fg_color,
-                                            bg=bg_color,
-                                            padx=20,
-                                            pady=12)
-                        cell_label.grid(row=row_idx, column=col_idx, sticky='ew')
-                    row_idx += 1
-
-        status_text = ""
-        if current_lesson is not None:
-            start_time, end_time = self.lesson_times[current_lesson]
-            status_text = f"Сейчас идёт урок ({start_time}-{end_time})"
-        elif next_lesson is not None:
-            start_time, end_time = self.lesson_times[next_lesson]
-            status_text = f"Сейчас перемена, следующий урок в {start_time}"
-        else:
-            status_text = "Учебный день завершён"
-        
-        total_page = max(1, (len(classes_with_lesson) + self.classes_per_page - 1) // self.classes_per_page)
         self.create_footer(f"Статус: {status_text} | Страница: {self.current_classes_page+1}/{total_page} | "
-                f"Классов с уроком: {len(classes_with_lesson)} | День: {current_day}")
+                           f"Классов с уроком: {len(classes_with_lesson)} | День: {current_day}")
 
         buttons = [
             ("◀ СТРАНИЦА", self.prev_classes_page),
@@ -655,19 +793,13 @@ class App:
         ]
         self.create_navigation_buttons(buttons)
 
-        for i in range(len(headers)):
-            table_frame.columnconfigure(i, weight=1)
-
         self.start_auto_flip()
 
-
+    # ---------- ОСТАЛЬНЫЕ ЭКРАНЫ ----------
     def show_class_schedule(self, class_name):
-        """Показать расписание для конкретного класса"""
         self.is_main_screen = False
         self.clear_window()
         self.current_class = class_name
-
-        # Создаем заголовок
         self.create_header(f"✈ РАСПИСАНИЕ КЛАССА {class_name} ✈")
 
         if not self.rasp_wth_changes or self.day_today not in self.rasp_wth_changes:
@@ -675,32 +807,19 @@ class App:
             self.create_navigation_buttons([("НАЗАД", self.show_all_classes_schedule)])
             return
         rasp = self.rasp_wth_changes[self.day_today]
-
-        # Создаем информационную строку
         self.create_status_bar(f"Расписание класса {class_name} на текущий день")
 
-        # Основная таблица
         table_frame = tk.Frame(self.root, bg=self.bg_color)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
 
-        # Заголовки таблицы
         headers = ["№ УРОКА", "ВРЕМЯ", "ПРЕДМЕТ", "КЛАСС", "КАБИНЕТ", "СТАТУС"]
+        for i, h in enumerate(headers):
+            tk.Label(table_frame, text=h, font=self.header_font, fg=self.highlight_color,
+                     bg=self.bg_color, padx=20, pady=15).grid(row=0, column=i, sticky='ew')
 
-        for i, header in enumerate(headers):
-            header_label = tk.Label(table_frame,
-                                    text=header,
-                                    font=self.header_font,
-                                    fg=self.highlight_color,
-                                    bg=self.bg_color,
-                                    padx=20,
-                                    pady=15)
-            header_label.grid(row=0, column=i, sticky='ew')
-        # Фильтруем уроки в зависимости от режима
-        rasp = self.rasp_wth_changes[self.day_today]
         schedule_to_show = []
         if class_name in rasp.keys():
             schedule_to_show = rasp[class_name]
-
             if not self.show_all_lessons:
                 current_time = self.get_time_now().time()
                 schedule_to_show = []
@@ -714,52 +833,38 @@ class App:
                         except:
                             schedule_to_show.append(lesson)
 
-            # Отображаем уроки
             for row_idx, row_data in enumerate(schedule_to_show, 1):
                 is_cancelled = row_data[6] == "ОТМЕНЕНО"
-
-                # Пропускаем колонку с учителем (индекс 5)
                 display_data = (row_data[0], row_data[1], row_data[2], row_data[3], row_data[4], row_data[6])
-
                 for col_idx, cell_data in enumerate(display_data):
                     if is_cancelled:
                         bg_color = self.cancelled_bg
-                        if col_idx == 5:  # Статус
+                        if col_idx == 5:
                             fg_color = '#FFFFFF'
-                        elif col_idx in [0, 1]:  # № урока и время
+                        elif col_idx in [0, 1]:
                             fg_color = '#00FFFF'
                         else:
                             fg_color = self.cancelled_fg
                     else:
                         bg_color = self.bg_color
-                        if col_idx == 5:  # Статус
+                        if col_idx == 5:
                             if cell_data == "ИЗМЕНЕНО":
                                 fg_color = self.warning_color
                             elif cell_data == "ОТМЕНЕНО":
                                 fg_color = '#FF6666'
                             else:
                                 fg_color = '#00FF00'
-                        elif col_idx in [0, 1]:  # № урока и время
+                        elif col_idx in [0, 1]:
                             fg_color = self.text_color
                         else:
                             fg_color = '#FFFFFF'
-
-                    cell_label = tk.Label(table_frame,
-                                          text=cell_data,
-                                          font=self.data_font,
-                                          fg=fg_color,
-                                          bg=bg_color,
-                                          padx=20,
-                                          pady=12)
-                    cell_label.grid(row=row_idx, column=col_idx, sticky='ew')
+                    tk.Label(table_frame, text=cell_data, font=self.data_font, fg=fg_color,
+                             bg=bg_color, padx=20, pady=12).grid(row=row_idx, column=col_idx, sticky='ew')
 
         self.reset_idle_timer()
-
-        # Информационная строка
         mode_text = "ВСЕ УРОКИ" if self.show_all_lessons else "ТОЛЬКО БУДУЩИЕ"
         self.create_footer(f"Класс: {class_name} | Режим: {mode_text} | Уроков: {len(schedule_to_show)}")
 
-        # Кнопки навигации
         toggle_text = "ТОЛЬКО БУДУЩИЕ" if self.show_all_lessons else "ВСЕ УРОКИ"
         buttons = [
             ("ОБНОВИТЬ", self.refresh_class_schedule),
@@ -770,157 +875,96 @@ class App:
         ]
         self.create_navigation_buttons(buttons)
 
-        # Настраиваем вес колонок
         for i in range(len(headers)):
             table_frame.columnconfigure(i, weight=1)
 
-
     def show_class_selection(self):
         self.is_main_screen = False
-        """Окно выбора класса с крупными элементами и параллелями в 2 колонки"""
         self.clear_window()
-
         self.create_header("✈ ВЫБОР КЛАССА ✈")
         self.create_status_bar("Выберите параллель, затем класс для просмотра расписания")
 
-        # Основной контейнер (использует pack)
         main_frame = tk.Frame(self.root, bg=self.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
 
-        # ---- Левая панель (параллели) ----
-        # Фиксированная ширина для комфортного размещения двух колонок
         left_panel = tk.Frame(main_frame, bg=self.bg_color, width=650)
         left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        left_panel.pack_propagate(False)  # чтобы ширина не сжималась
+        left_panel.pack_propagate(False)
 
-        tk.Label(left_panel,
-                text="ПАРАЛЛЕЛИ",
-                font=self.header_font,
-                fg=self.highlight_color,
-                bg=self.bg_color).pack(pady=15)
+        tk.Label(left_panel, text="ПАРАЛЛЕЛИ", font=self.header_font,
+                 fg=self.highlight_color, bg=self.bg_color).pack(pady=15)
 
-        # Canvas для прокрутки левой панели
         left_canvas = tk.Canvas(left_panel, bg=self.bg_color, highlightthickness=0)
-        # left_scrollbar = tk.Scrollbar(left_panel, orient="vertical", command=left_canvas.yview)
         self.left_buttons_frame = tk.Frame(left_canvas, bg=self.bg_color)
-
-        self.left_buttons_frame.bind(
-            "<Configure>",
-            lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all"))
-        )
+        self.left_buttons_frame.bind("<Configure>",
+                                     lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
         left_canvas.create_window((0, 0), window=self.left_buttons_frame, anchor="nw")
-        # left_canvas.configure(yscrollcommand=left_scrollbar.set)
-
         left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        # left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # ---- Правая панель (классы) ----
         right_panel = tk.Frame(main_frame, bg=self.bg_color)
         right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.right_title = tk.Label(right_panel,
-                                    text="ВЫБЕРИТЕ ПАРАЛЛЕЛЬ",
-                                    font=self.header_font,
-                                    fg=self.text_color,
-                                    bg=self.bg_color)
+        self.right_title = tk.Label(right_panel, text="ВЫБЕРИТЕ ПАРАЛЛЕЛЬ",
+                                    font=self.header_font, fg=self.text_color, bg=self.bg_color)
         self.right_title.pack(pady=15)
 
-        # Canvas для прокрутки правой панели
         right_canvas = tk.Canvas(right_panel, bg=self.bg_color, highlightthickness=0)
-        # right_scrollbar = tk.Scrollbar(right_panel, orient="vertical", command=right_canvas.yview)
         self.right_classes_frame = tk.Frame(right_canvas, bg=self.bg_color)
-
-        self.right_classes_frame.bind(
-            "<Configure>",
-            lambda e: right_canvas.configure(scrollregion=right_canvas.bbox("all"))
-        )
+        self.right_classes_frame.bind("<Configure>",
+                                      lambda e: right_canvas.configure(scrollregion=right_canvas.bbox("all")))
         right_canvas.create_window((0, 0), window=self.right_classes_frame, anchor="nw")
-        # right_canvas.configure(yscrollcommand=right_scrollbar.set)
-
         right_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        # right_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # ---- Создаём кнопки параллелей в 2 колонки ----
         self.choice_font = font.Font(family="Courier", size=22, weight="bold")
 
         row, col = 0, 0
         for group in self.class_groups:
-            btn = tk.Button(self.left_buttons_frame,
-                            text=group['name'],
-                            font=self.choice_font,
-                            bg='#003366',
-                            fg='white',
-                            activebackground='#0066CC',
-                            activeforeground='white',
-                            relief='raised',
-                            borderwidth=3,
-                            padx=10,
-                            pady=12,
-                            command=lambda g=group: self.on_grade_selected(g))
-            btn.grid(row=row, column=col, padx=8, pady=8, sticky='ew')
+            tk.Button(self.left_buttons_frame, text=group['name'], font=self.choice_font,
+                      bg='#003366', fg='white', activebackground='#0066CC', activeforeground='white',
+                      relief='raised', borderwidth=3, padx=10, pady=12,
+                      command=lambda g=group: self.on_grade_selected(g)).grid(
+                row=row, column=col, padx=8, pady=8, sticky='ew')
             col += 1
             if col >= 2:
                 col = 0
                 row += 1
 
-        # Растягиваем колонки левой панели
         for i in range(2):
             self.left_buttons_frame.grid_columnconfigure(i, weight=1)
         for i in range(row + 1):
             self.left_buttons_frame.grid_rowconfigure(i, weight=1)
 
-        # Показываем первую параллель по умолчанию
         if self.class_groups:
             self.on_grade_selected(self.class_groups[0])
 
         self.create_footer(f"Всего доступных классов: {len(self.all_classes)}")
-
         buttons = [
             ("ВСЕ РАСПИСАНИЕ", self.show_full_schedule),
             ("К ОБЩЕМУ РАСПИСАНИЮ", self.show_all_classes_schedule),
         ]
         self.create_navigation_buttons(buttons)
-
         self.reset_idle_timer()
 
-
     def on_grade_selected(self, group):
-        """Обновляет правую панель: классы выбранной параллели в 4 колонки"""
         self.right_title.config(text=f"{group['name']}")
-
-        # Очищаем старые кнопки классов
         for widget in self.right_classes_frame.winfo_children():
             widget.destroy()
-
-        # Размещаем классы в 4 колонки
         cols = 5
         row, col = 0, 0
         for class_name in group['classes']:
-            btn = tk.Button(self.right_classes_frame,
-                            text=class_name,
-                            font=self.choice_font,
-                            bg='#003366',
-                            fg='white',
-                            activebackground='#0066CC',
-                            activeforeground='white',
-                            relief='raised',
-                            borderwidth=3,
-                            padx=20,
-                            pady=18,
-                            command=lambda c=class_name: self.show_class_schedule(c))
-            btn.grid(row=row, column=col, padx=10, pady=10, sticky='nsew')
+            tk.Button(self.right_classes_frame, text=class_name, font=self.choice_font,
+                      bg='#003366', fg='white', activebackground='#0066CC', activeforeground='white',
+                      relief='raised', borderwidth=3, padx=20, pady=18,
+                      command=lambda c=class_name: self.show_class_schedule(c)).grid(
+                row=row, column=col, padx=10, pady=10, sticky='nsew')
             col += 1
             if col >= cols:
                 col = 0
                 row += 1
-
-        # Настраиваем веса для растяжения
         for i in range(cols):
             self.right_classes_frame.grid_columnconfigure(i, weight=1)
         for i in range(row + 1):
             self.right_classes_frame.grid_rowconfigure(i, weight=1)
-
-        # Подсвечиваем выбранную параллель
         for child in self.left_buttons_frame.winfo_children():
             if isinstance(child, tk.Button):
                 if child['text'] == group['name']:
@@ -928,59 +972,44 @@ class App:
                 else:
                     child.config(bg='#003366')
 
-
     def show_full_schedule(self):
         self.is_main_screen = False
-        """Показать полное расписание для всех классов"""
         self.clear_window()
 
-        # Проверяем, что есть группы для отображения
         if not self.class_groups:
             self.create_status_bar("Нет данных для отображения")
             self.create_navigation_buttons([("НАЗАД", self.show_all_classes_schedule)])
             return
 
-        # Проверяем индекс текущей группы
         if self.current_group_index >= len(self.class_groups):
             self.current_group_index = 0
 
-        # Проверка наличия данных
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения")
             self.create_navigation_buttons([("ВЫХОД", self.root.quit)])
             return
 
-        # Создаем заголовок
         current_group = self.class_groups[self.current_group_index]
         current_day = self.days_of_week[self.current_day_index]
 
-        # Проверяем, есть ли расписание на этот день
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
             self.create_navigation_buttons([("НАЗАД", self.show_all_classes_schedule)])
             return
 
         day_schedule = self.rasp_wth_changes[current_day]
-
         self.create_header(f"✈ РАСПИСАНИЕ - {current_day} ✈")
         self.create_status_bar(f"{current_day} | {current_group['name']}")
-
-        # Кнопки навигации по дням
         self.create_day_navigation_buttons()
-
-        # Кнопки навигации по группам классов
         self.create_group_navigation_buttons()
 
-        # Основная таблица со скроллом
         container = tk.Frame(self.root, bg=self.bg_color)
         container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
 
         canvas = tk.Canvas(container, bg=self.bg_color, highlightthickness=0)
         scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
         table_frame = tk.Frame(canvas, bg=self.bg_color)
-
-        table_frame.bind("<Configure>",
-                        lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        table_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=table_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
@@ -990,7 +1019,6 @@ class App:
         canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
         canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
 
-        # Заголовки таблицы
         max_lessons = 0
         for class_name in current_group['classes']:
             if class_name in day_schedule:
@@ -1002,33 +1030,22 @@ class App:
             return
 
         headers = ["КЛАСС"] + [f"УРОК {i}" for i in range(1, max_lessons + 1)]
-
-        for i, header in enumerate(headers):
-            header_label = tk.Label(table_frame,
-                                    text=header,
-                                    font=self.header_font,
-                                    fg=self.highlight_color,
-                                    bg=self.bg_color,
-                                    padx=15,
-                                    pady=12,
-                                    borderwidth=2,
-                                    relief="solid")
-            header_label.grid(row=0, column=i, sticky='nsew')
+        for i, h in enumerate(headers):
+            tk.Label(table_frame, text=h, font=self.header_font, fg=self.highlight_color,
+                     bg=self.bg_color, padx=15, pady=12, borderwidth=2, relief="solid").grid(
+                row=0, column=i, sticky='nsew')
 
         row_idx = 1
         for class_name in current_group['classes']:
             if class_name in day_schedule:
                 row_data = [class_name]
                 rasp_cur_class = day_schedule[class_name]
-
                 for lesson_num in range(1, max_lessons + 1):
                     if (lesson_num - 1) < len(rasp_cur_class):
                         lesson_info = f"{rasp_cur_class[lesson_num-1][2]}\n{rasp_cur_class[lesson_num-1][4]}"
                     else:
                         lesson_info = ""
                     row_data.append(lesson_info)
-
-                # Отображаем строку
                 for col_idx, cell_data in enumerate(row_data):
                     bg_color = self.bg_color if row_idx % 2 == 0 else '#001144'
                     if col_idx == 0:
@@ -1036,27 +1053,16 @@ class App:
                         fg_color = self.text_color
                     else:
                         fg_color = '#FFFFFF'
-
-                    cell_label = tk.Label(table_frame,
-                                        text=cell_data,
-                                        font=self.data_font,
-                                        fg=fg_color,
-                                        bg=bg_color,
-                                        padx=15,
-                                        pady=10,
-                                        borderwidth=1,
-                                        relief="solid",
-                                        justify="center")
-                    cell_label.grid(row=row_idx, column=col_idx, sticky='nsew')
+                    tk.Label(table_frame, text=cell_data, font=self.data_font, fg=fg_color,
+                             bg=bg_color, padx=15, pady=10, borderwidth=1, relief="solid",
+                             justify="center").grid(row=row_idx, column=col_idx, sticky='nsew')
                 row_idx += 1
 
-        # Информационная строка
         group_info = f"{self.current_group_index + 1}/{len(self.class_groups)}"
         day_info = f"{self.current_day_index + 1}/{len(self.days_of_week)}"
-        self.create_footer(
-            f"День: {current_day} | Группа: {current_group['name']} | Страница дня: {day_info} | Страница группы: {group_info}")
+        self.create_footer(f"День: {current_day} | Группа: {current_group['name']} | "
+                           f"Страница дня: {day_info} | Страница группы: {group_info}")
 
-        # Кнопки навигации
         buttons = [
             ("ОБЩЕЕ РАСПИСАНИЕ", self.show_all_classes_schedule),
             ("ВЫБРАТЬ КЛАСС", self.show_class_selection),
@@ -1064,21 +1070,17 @@ class App:
         ]
         self.create_navigation_buttons(buttons)
 
-        # Настраиваем вес колонок
         for i in range(len(headers)):
             table_frame.columnconfigure(i, weight=1)
-
 
         self.reset_idle_timer()
 
     def prev_group(self):
-        """Перейти к предыдущей группе классов"""
         if self.current_group_index > 0:
             self.current_group_index -= 1
             self.show_full_schedule()
 
     def next_group(self):
-        """Перейти к следующей группе классов"""
         if self.current_group_index < len(self.class_groups) - 1:
             self.current_group_index += 1
             self.show_full_schedule()
@@ -1090,45 +1092,38 @@ class App:
             self.data = new_data
             download_fromServer.save_schedule_to_cache(new_data)
             self.rasp_wth_changes = self.make_rasp_wth_changes()
-            self.all_classes = sorted(self.data["fromExcel"]["sp_classes"], 
-                                    key=lambda x: (int(x.split('-')[0]), int(x.split('-')[1])))
+            self.all_classes = sorted(self.data["fromExcel"]["sp_classes"],
+                                      key=lambda x: (int(x.split('-')[0]), int(x.split('-')[1])))
             self.class_groups = self.create_class_groups()
         else:
             print("Сервер недоступен, данные не обновлены")
         self.show_all_classes_schedule()
-        
+
     def refresh_class_schedule(self):
-        """Обновить расписание для текущего класса"""
         print(f"Обновление расписания для класса {self.current_class}...")
         if self.current_class:
             self.show_class_schedule(self.current_class)
 
     def toggle_lesson_mode(self):
-        """Переключить режим отображения уроков"""
         self.show_all_lessons = not self.show_all_lessons
         if self.current_class:
             self.show_class_schedule(self.current_class)
 
     def setup_idle_timer(self):
-        """Настройка таймера бездействия."""
-        # Привязываем события, сбрасывающие таймер (любое действие пользователя)
         self.root.bind_all('<Key>', self.reset_idle_timer)
         self.root.bind_all('<Button>', self.reset_idle_timer)
         self.root.bind_all('<Motion>', self.reset_idle_timer)
         self.root.bind_all('<Enter>', self.reset_idle_timer)
         self.root.bind_all('<FocusIn>', self.reset_idle_timer)
-        self.reset_idle_timer()  # запускаем таймер сразу
+        self.reset_idle_timer()
 
     def reset_idle_timer(self, event=None):
-        """Сброс таймера бездействия."""
         if self.idle_timer_id:
             self.root.after_cancel(self.idle_timer_id)
             self.idle_timer_id = None
-        # Запускаем новый таймер на 10 минут (600000 мс)
         self.idle_timer_id = self.root.after(300000, self.on_idle_timeout)
 
     def on_idle_timeout(self):
-        """Действие при бездействии 10 минут."""
         self.idle_timer_id = None
         if not self.is_main_screen:
             self.show_all_classes_schedule()
