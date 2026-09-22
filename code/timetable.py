@@ -67,6 +67,7 @@ class App:
         self.table_rows = []
         self.rows_container = None
         self.footer_label = None
+        self.status_banner_label = None
         self.page_info = {"current": 1, "total": 1, "classes_count": 0, "day": ""}
         self.current_page_data = []
 
@@ -183,7 +184,7 @@ class App:
                         relwidth=1.0, height=self.row_height_px)
         row_frame.pack_propagate(False)
 
-        row_frame.grid_rowconfigure(0, weight=1)   # ВАЖНО для вертикального центрирования
+        row_frame.grid_rowconfigure(0, weight=1)
         for i in range(6):
             row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
 
@@ -204,7 +205,7 @@ class App:
             w.destroy()
         row_bg = self._row_bg(index)
         row_frame.configure(bg=row_bg)
-        row_frame.grid_rowconfigure(0, weight=1)   # ВАЖНО
+        row_frame.grid_rowconfigure(0, weight=1)
         for i in range(6):
             row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
         for i, (text, bg, fg) in enumerate(self._prepare_cells(row_data, row_bg)):
@@ -336,7 +337,7 @@ class App:
 
         for w in row_frame.winfo_children():
             w.destroy()
-        row_frame.grid_rowconfigure(0, weight=1)   # ВАЖНО
+        row_frame.grid_rowconfigure(0, weight=1)
         for i in range(6):
             row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
         for i, (text, bg, fg) in enumerate(self._prepare_cells(new_row_data, row_bg)):
@@ -640,6 +641,7 @@ class App:
         self.table_rows = []
         self.rows_container = None
         self.footer_label = None
+        self.status_banner_label = None
 
     # ---------- ВСПОМОГАТЕЛЬНЫЙ: ЧИП-КНОПКА ----------
     def _make_chip_button(self, parent, text, command, active=False, font_=None):
@@ -660,7 +662,6 @@ class App:
 
     # ---------- ОБНОВЛЕНИЕ ДАННЫХ ----------
     def _fetch_and_apply(self):
-        """Тянет свежие данные с сервера и применяет их. Возвращает True при успехе."""
         print("Обновление данных с сервера...")
         new_data = download_fromServer.fetch_schedule()
         if new_data is not None:
@@ -696,13 +697,49 @@ class App:
         self.update_clock()
         return header_frame
 
-    def create_status_bar(self, text):
+    def create_status_bar(self, text=None):
+        """Верхняя полоса. Если text=None — здесь будет баннер статуса (урок/перемена)."""
         info_frame = tk.Frame(self.root, bg=self.bg_panel)
         info_frame.pack(fill=tk.X)
-        tk.Label(info_frame, text=text, font=self.data_font,
-                 fg=self.text_dim, bg=self.bg_panel).pack(pady=10)
+
+        if text is None:
+            # Режим баннера
+            self.status_banner_label = tk.Label(
+                info_frame, text="",
+                font=font.Font(family="Segoe UI", size=22, weight="bold"),
+                fg=self.text_dim, bg=self.bg_panel
+            )
+            self.status_banner_label.pack(pady=12)
+        else:
+            # Обычный текст (для остальных экранов)
+            self.status_banner_label = tk.Label(
+                info_frame, text=text, font=self.data_font,
+                fg=self.text_dim, bg=self.bg_panel
+            )
+            self.status_banner_label.pack(pady=10)
+
         tk.Frame(info_frame, bg=self.separator_color, height=1).pack(fill=tk.X, side=tk.BOTTOM)
         return info_frame
+
+    def _update_status_banner(self):
+        """Обновляет баннер статуса: урок / перемена / завершено."""
+        if not self.is_main_screen:
+            return
+        if not self.status_banner_label or not self.status_banner_label.winfo_exists():
+            return
+        current_lesson, next_lesson, _ = self.get_current_lesson_info()
+        if current_lesson is not None:
+            start_time, end_time = self.lesson_times[current_lesson]
+            text = f"●  ИДЁТ УРОК №{current_lesson + 1}  •  {start_time} — {end_time}"
+            color = self.status_ok
+        elif next_lesson is not None:
+            start_time, _ = self.lesson_times[next_lesson]
+            text = f"ПЕРЕМЕНА  •  следующий урок в {start_time}"
+            color = self.accent_amber
+        else:
+            text = "●  УЧЕБНЫЙ ДЕНЬ ЗАВЕРШЁН"
+            color = self.text_dim
+        self.status_banner_label.config(text=text, fg=color)
 
     def create_footer(self, text):
         info_frame = tk.Frame(self.root, bg=self.bg_panel)
@@ -765,6 +802,10 @@ class App:
             if hasattr(self, 'clock_label') and self.clock_label.winfo_exists():
                 self.clock_label.config(text=current_time)
                 new_current, new_next, _ = self.get_current_lesson_info()
+
+                # обновляем баннер каждую секунду (только на главном экране)
+                self._update_status_banner()
+
                 if self._last_lesson_index is None:
                     self._last_lesson_index = new_current
                     self._last_next_index = new_next
@@ -814,7 +855,8 @@ class App:
         self.reset_idle_timer()
         self.clear_window()
         self.create_header("✈  ТЕКУЩИЕ УРОКИ — ВСЕ КЛАССЫ  ✈")
-        self.create_status_bar("Информационная система школьного расписания")
+        self.create_status_bar()          # режим баннера
+        self._update_status_banner()
 
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения (проверьте подключение к серверу)")
@@ -845,7 +887,6 @@ class App:
             canvas.itemconfig(table_window, width=event.width)
         canvas.bind("<Configure>", _stretch_table)
 
-        # без скроллбара — только колесо мыши
         canvas.pack(fill="both", expand=True)
 
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
@@ -1154,7 +1195,6 @@ class App:
             ])
             return
 
-        # Контейнер с прокруткой (без визуального скроллбара)
         container = tk.Frame(self.root, bg=self.bg_color)
         container.pack(fill=tk.BOTH, expand=True, padx=30, pady=(0, 12))
 
@@ -1171,13 +1211,11 @@ class App:
 
         headers = ["КЛАСС"] + [f"УРОК {i}" for i in range(1, max_lessons + 1)]
 
-        # --- Шапка таблицы ---
         for i, h in enumerate(headers):
             tk.Label(table_frame, text=h, font=self.header_font, fg=self.accent_amber,
                      bg=self.bg_color, padx=15, pady=16,
                      anchor="center").grid(row=0, column=i, sticky='nsew')
 
-        # --- Строки данных ---
         ROW_HEIGHT = 95
         row_idx = 1
         for class_name in current_group['classes']:
@@ -1217,7 +1255,7 @@ class App:
 
             row_idx += 1
 
-        # === ФИКСИРОВАННАЯ ШИРИНА ПЕРВОЙ КОЛОНКИ ===
+        # Фиксированная ширина первой колонки
         table_frame.columnconfigure(0, weight=0, minsize=220)
         for i in range(1, len(headers)):
             table_frame.columnconfigure(i, weight=1, uniform="full")
