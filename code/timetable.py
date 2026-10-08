@@ -1696,8 +1696,6 @@ class App:
     def setup_idle_timer(self):
         self.root.bind_all('<Key>', self.reset_idle_timer)
         self.root.bind_all('<Button>', self.reset_idle_timer)
-        self.root.bind_all('<Motion>', self.reset_idle_timer)
-        self.root.bind_all('<Enter>', self.reset_idle_timer)
         self.root.bind_all('<FocusIn>', self.reset_idle_timer)
         self.reset_idle_timer()
 
