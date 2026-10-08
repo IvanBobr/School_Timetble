@@ -5,7 +5,6 @@ import re
 import download_fromServer
 from json import loads
 
-SERVER_IP = '45.142.36.216'
 
 class App:
     def __init__(self):
@@ -102,7 +101,7 @@ class App:
 
         self._last_lesson_index, self._last_next_index, _ = self.get_current_lesson_info()
 
-        self.data = download_fromServer.fetch_schedule(server_ip=SERVER_IP)
+        self.data = download_fromServer.fetch_schedule()
 
         if self.data is not None:
             download_fromServer.save_schedule_to_cache(self.data)
@@ -645,6 +644,7 @@ class App:
 
     # ---------- ПАГИНАЦИЯ ЭКРАНА "ВСЁ РАСПИСАНИЕ" ----------
     def _full_schedule_classes(self):
+        """Возвращает список классов текущей группы, у которых есть уроки в выбранный день."""
         day_schedule = self.rasp_wth_changes.get(self.days_of_week[self.current_day_index], {})
         if not self.class_groups:
             return []
@@ -670,6 +670,7 @@ class App:
 
     # ---------- ЛОГИКА ----------
     def _class_sort_key(self, name):
+        """Сортировка классов 5-5, 5-6, ..., 5-10 (а не 5-10 раньше 5-6)."""
         m = re.match(r'^(\d+)-(\d+)$', name)
         if m:
             return (int(m.group(1)), int(m.group(2)))
@@ -862,7 +863,7 @@ class App:
     # ---------- ОБНОВЛЕНИЕ ДАННЫХ ----------
     def _fetch_and_apply(self):
         print("Обновление данных с сервера...")
-        new_data = download_fromServer.fetch_schedule(server_ip=SERVER_IP)
+        new_data = download_fromServer.fetch_schedule()
         if new_data is not None:
             self.data = new_data
             download_fromServer.save_schedule_to_cache(new_data)
@@ -1100,7 +1101,9 @@ class App:
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения (проверьте подключение к серверу)")
             self.create_navigation_buttons(
-                self._get_nav_trio('main')
+                self._get_nav_trio('main') + [
+                    ("ВЫХОД", self.root.quit, {'side': 'right'}),
+                ]
             )
             return
 
@@ -1108,7 +1111,9 @@ class App:
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
             self.create_navigation_buttons(
-                self._get_nav_trio('main')
+                self._get_nav_trio('main') + [
+                    ("ВЫХОД", self.root.quit, {'side': 'right'}),
+                ]
             )
             return
 
@@ -1188,6 +1193,7 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('main')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         self.start_auto_flip()
@@ -1207,6 +1213,7 @@ class App:
                 ("SEP", None),
             ]
             buttons += self._get_nav_trio('class')
+            buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
             self.create_navigation_buttons(buttons)
             return
         rasp = self.rasp_wth_changes[self.day_today]
@@ -1302,6 +1309,7 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('class')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         for i in range(len(headers)):
@@ -1374,7 +1382,12 @@ class App:
             self.on_grade_selected(self.class_groups[0])
 
         self.create_footer(f"Всего доступных классов: {len(self.all_classes)}")
-        buttons = self._get_nav_trio('selection')
+        buttons = [
+            ("ОБНОВИТЬ", self.refresh_current),
+            ("SEP", None),
+        ]
+        buttons += self._get_nav_trio('selection')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
         self.reset_idle_timer()
 
@@ -1413,7 +1426,6 @@ class App:
             self.right_classes_frame.grid_columnconfigure(i, weight=1, uniform="cls")
 
         self._render_parallel_current_card(group)
-
         if hasattr(self, 'right_canvas') and self.right_canvas.winfo_exists():
             self.right_canvas.yview_moveto(0)
 
@@ -1521,7 +1533,9 @@ class App:
 
         if not self.class_groups:
             self.create_status_bar("Нет данных для отображения")
-            buttons = self._get_nav_trio('full')
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
             self.create_navigation_buttons(buttons)
             return
 
@@ -1530,7 +1544,9 @@ class App:
 
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения")
-            buttons = self._get_nav_trio('full')
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
             self.create_navigation_buttons(buttons)
             return
 
@@ -1539,7 +1555,9 @@ class App:
 
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
-            buttons = self._get_nav_trio('full')
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
             self.create_navigation_buttons(buttons)
             return
 
@@ -1556,7 +1574,9 @@ class App:
 
         if max_lessons == 0:
             self.create_status_bar("Нет уроков для отображения")
-            buttons = self._get_nav_trio('full')
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
             self.create_navigation_buttons(buttons)
             return
 
@@ -1572,6 +1592,7 @@ class App:
         end = start + self.full_classes_per_page
         classes_in_table = all_classes_in_table[start:end]
 
+        # === ФИКСИРОВАННЫЕ ПАРАМЕТРЫ ТАБЛИЦЫ ===
         ROW_HEIGHT = 95
         cell_font = self.data_font
 
@@ -1642,6 +1663,7 @@ class App:
         for i in range(1, len(headers)):
             table_frame.columnconfigure(i, weight=1, uniform="full")
 
+        # === ФУТЕР ===
         if total_pages > 1:
             page_info = f"  •  Страница: {self.current_full_page+1}/{total_pages}"
         else:
@@ -1651,6 +1673,7 @@ class App:
                            f"•  Классов: {total_classes}{page_info}  "
                            f"•  Кликните на класс, чтобы открыть его расписание")
 
+        # === КНОПКИ ===
         pages_disabled = total_pages <= 1
         buttons = [
             ("◀  СТРАНИЦА", self.prev_full_page, {'disabled': pages_disabled}),
@@ -1660,6 +1683,7 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('full')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         self.reset_idle_timer()
