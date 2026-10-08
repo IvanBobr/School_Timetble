@@ -62,7 +62,7 @@ class App:
 
         # Пагинация главного экрана
         self.current_classes_page = 0
-        self.classes_per_page = 8
+        self.classes_per_page = 7
         self.auto_flip_job = None
         self.auto_flip_interval = 15000
 
