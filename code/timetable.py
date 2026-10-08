@@ -809,6 +809,8 @@ class App:
         self.root.bind('<Control-Shift-D>', lambda e: self.open_debug_dialog())
         self.root.bind('<Control-Shift-d>', lambda e: self.open_debug_dialog())
         self.root.bind('<F12>', lambda e: self.open_debug_dialog())
+        self.root.bind('<Control-q>', lambda e: self.root.quit())
+        self.root.bind('<Control-Q>', lambda e: self.root.quit())
 
     def clear_window(self):
         self.stop_auto_flip()
