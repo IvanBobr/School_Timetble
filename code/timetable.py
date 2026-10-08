@@ -1703,7 +1703,7 @@ class App:
         if self.idle_timer_id:
             self.root.after_cancel(self.idle_timer_id)
             self.idle_timer_id = None
-        self.idle_timer_id = self.root.after(300000, self.on_idle_timeout)
+        self.idle_timer_id = self.root.after(30000, self.on_idle_timeout)
 
     def on_idle_timeout(self):
         self.idle_timer_id = None
