@@ -7,6 +7,7 @@ from json import loads
 
 SERVER_IP = '45.142.36.216'
 
+
 class App:
     def __init__(self):
         self.root = tk.Tk()
@@ -1102,7 +1103,9 @@ class App:
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения (проверьте подключение к серверу)")
             self.create_navigation_buttons(
-                self._get_nav_trio('main')
+                self._get_nav_trio('main') + [
+                    ("ВЫХОД", self.root.quit, {'side': 'right'}),
+                ]
             )
             return
 
@@ -1110,7 +1113,9 @@ class App:
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
             self.create_navigation_buttons(
-                self._get_nav_trio('main')
+                self._get_nav_trio('main') + [
+                    ("ВЫХОД", self.root.quit, {'side': 'right'}),
+                ]
             )
             return
 
@@ -1190,6 +1195,7 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('main')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         self.start_auto_flip()
@@ -1209,6 +1215,7 @@ class App:
                 ("SEP", None),
             ]
             buttons += self._get_nav_trio('class')
+            buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
             self.create_navigation_buttons(buttons)
             return
         rasp = self.rasp_wth_changes[self.day_today]
@@ -1304,6 +1311,7 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('class')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         for i in range(len(headers)):
@@ -1376,7 +1384,12 @@ class App:
             self.on_grade_selected(self.class_groups[0])
 
         self.create_footer(f"Всего доступных классов: {len(self.all_classes)}")
-        buttons = self._get_nav_trio('selection')
+        buttons = [
+            ("ОБНОВИТЬ", self.refresh_current),
+            ("SEP", None),
+        ]
+        buttons += self._get_nav_trio('selection')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
         self.reset_idle_timer()
 
@@ -1523,7 +1536,9 @@ class App:
 
         if not self.class_groups:
             self.create_status_bar("Нет данных для отображения")
-            buttons = self._get_nav_trio('full')
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
             self.create_navigation_buttons(buttons)
             return
 
@@ -1532,7 +1547,9 @@ class App:
 
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения")
-            buttons = self._get_nav_trio('full')
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
             self.create_navigation_buttons(buttons)
             return
 
@@ -1541,7 +1558,9 @@ class App:
 
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
-            buttons = self._get_nav_trio('full')
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
             self.create_navigation_buttons(buttons)
             return
 
@@ -1558,7 +1577,9 @@ class App:
 
         if max_lessons == 0:
             self.create_status_bar("Нет уроков для отображения")
-            buttons = self._get_nav_trio('full')
+            buttons = self._get_nav_trio('full') + [
+                ("ВЫХОД", self.root.quit, {'side': 'right'}),
+            ]
             self.create_navigation_buttons(buttons)
             return
 
@@ -1662,6 +1683,7 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('full')
+        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         self.reset_idle_timer()
