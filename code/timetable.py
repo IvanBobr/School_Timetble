@@ -29,6 +29,7 @@ class App:
         self.bg_row_first_col = '#182238'
         self.bg_row_first_col_hover = '#243049'
         self.separator_color = '#1E2A3F'
+        self.flash_color     = '#1A2233'
 
         self.text_color      = '#E8EDF5'
         self.text_dim        = '#7A8BA3'
@@ -72,9 +73,9 @@ class App:
         self.current_full_page = 0
         self.full_classes_per_page = 6
 
-        # Автообновление данных с сервера
+        # Автообновление данных с сервера — 1 час
         self.data_refresh_job = None
-        self.data_refresh_interval = 30000   # 5 минут. Поставь 600000 = 10 мин, 3600000 = 1 час
+        self.data_refresh_interval = 3600000
 
         # Анимация flip
         self.flip_jobs = []
@@ -187,13 +188,11 @@ class App:
     def _do_data_refresh(self):
         self.data_refresh_job = None
 
-        # Если идёт анимация — подождём и попробуем снова
         if self.is_animating:
             self.data_refresh_job = self.root.after(2000, self._do_data_refresh)
             return
 
         try:
-            # снимок состояния до обновления
             old_rasp = self.rasp_wth_changes
             old_classes = list(self.all_classes)
 
@@ -203,7 +202,6 @@ class App:
 
             if changed:
                 print("[Auto-refresh] Данные изменились — перерисовываем текущий экран")
-                # запрещаем перерисовке сбрасывать idle-таймер, чтобы не мешать автовозврату
                 self._suppress_idle_reset = True
                 try:
                     self._redraw_current()
@@ -216,11 +214,9 @@ class App:
         except Exception as e:
             print(f"[Auto-refresh] Ошибка: {e}")
 
-        # планируем следующее обновление
         self.data_refresh_job = self.root.after(self.data_refresh_interval, self._do_data_refresh)
 
     def _redraw_current(self):
-        """Перерисовывает текущий экран без изменения контекста (страницы, параллели, класса)."""
         screen = getattr(self, '_current_screen', 'main')
         if screen == 'main':
             self.show_all_classes_schedule()
@@ -460,21 +456,6 @@ class App:
                         except Exception:
                             pass
 
-    def _replace_row_content(self, row_frame, row_data, index):
-        for w in row_frame.winfo_children():
-            w.destroy()
-        row_bg = self._row_bg(index)
-        row_frame.configure(bg=row_bg)
-        row_frame.grid_rowconfigure(0, weight=1)
-        for i in range(6):
-            row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
-
-        self._fill_row(row_frame, row_data, row_bg)
-
-        sep = tk.Frame(row_frame, bg=self.separator_color, height=1)
-        sep.place(relx=0, rely=1.0, anchor='sw', relwidth=1.0)
-        sep.lift()
-
     def _cancel_flip_jobs(self):
         for job in self.flip_jobs:
             try:
@@ -483,153 +464,36 @@ class App:
                 pass
         self.flip_jobs = []
 
-    def _flip_single_row(self, index, new_row_data, on_done=None):
-        if index >= len(self.table_rows):
-            if on_done:
-                on_done()
-            return
-        row_frame = self.table_rows[index]
-        if not row_frame.winfo_exists():
-            if on_done:
-                on_done()
-            return
-
-        base_y = index * self.row_height_px
-        base_h = self.row_height_px
-        mid_h = 3
-        half_duration = 120
-        steps = 8
-        step_ms = max(8, half_duration // steps)
-
-        def first_half(step=0):
-            if not row_frame.winfo_exists():
-                if on_done:
-                    on_done()
-                return
-            if step > steps:
-                self._update_row_in_place(row_frame, new_row_data, index)
-                second_half(0)
-                return
-            progress = step / steps
-            eased = 1 - (1 - progress) ** 2
-            cur_h = base_h - (base_h - mid_h) * eased
-            cur_y = base_y + (base_h - cur_h) / 2
-            try:
-                row_frame.place_configure(y=cur_y, height=cur_h)
-            except Exception:
-                pass
-            job = self.root.after(step_ms, lambda: first_half(step + 1))
-            self.flip_jobs.append(job)
-
-        def second_half(step=0):
-            if not row_frame.winfo_exists():
-                if on_done:
-                    on_done()
-                return
-            if step > steps:
-                try:
-                    row_frame.place_configure(y=base_y, height=base_h)
-                except Exception:
-                    pass
-                if on_done:
-                    on_done()
-                return
-            progress = step / steps
-            eased = progress ** 2
-            cur_h = mid_h + (base_h - mid_h) * eased
-            cur_y = base_y + (base_h - cur_h) / 2
-            try:
-                row_frame.place_configure(y=cur_y, height=cur_h)
-            except Exception:
-                pass
-            job = self.root.after(step_ms, lambda: second_half(step + 1))
-            self.flip_jobs.append(job)
-
-        first_half(0)
-
-    def _collapse_row(self, index):
+    def _soft_flash_row(self, index, row_data):
         if index >= len(self.table_rows):
             return
         row_frame = self.table_rows[index]
         if not row_frame.winfo_exists():
             return
 
-        base_y = index * self.row_height_px
-        base_h = self.row_height_px
-        steps = 10
-        step_ms = 25
+        flash = self.flash_color
 
-        def step(i=0):
+        try:
+            row_frame.configure(bg=flash)
+            for w in row_frame.winfo_children():
+                if isinstance(w, tk.Frame) and int(w.cget('height')) == 1:
+                    continue
+                if isinstance(w, tk.Label):
+                    w.configure(bg=flash)
+                elif isinstance(w, tk.Frame):
+                    w.configure(bg=flash)
+                    for c in w.winfo_children():
+                        if isinstance(c, tk.Label):
+                            c.configure(bg=flash)
+        except Exception:
+            pass
+
+        def apply():
             if not row_frame.winfo_exists():
                 return
-            if i > steps:
-                try:
-                    row_frame.destroy()
-                except Exception:
-                    pass
-                return
-            progress = i / steps
-            eased = 1 - (1 - progress) ** 2
-            cur_h = base_h * (1 - eased)
-            cur_y = base_y + (base_h - cur_h) / 2
-            try:
-                row_frame.place_configure(y=cur_y, height=cur_h)
-            except Exception:
-                pass
-            job = self.root.after(step_ms, lambda: step(i + 1))
-            self.flip_jobs.append(job)
+            self._update_row_in_place(row_frame, row_data, index)
 
-        step(0)
-
-    def _appear_row(self, index, new_row_data):
-        row_bg = self._row_bg(index)
-        if index >= len(self.table_rows):
-            row_frame = tk.Frame(self.rows_container, bg=row_bg)
-            row_frame.place(x=0, y=index * self.row_height_px, relwidth=1.0, height=0)
-            row_frame.pack_propagate(False)
-            self.table_rows.append(row_frame)
-        else:
-            row_frame = self.table_rows[index]
-            row_frame.configure(bg=row_bg)
-
-        for w in row_frame.winfo_children():
-            w.destroy()
-        row_frame.grid_rowconfigure(0, weight=1)
-        for i in range(6):
-            row_frame.grid_columnconfigure(i, weight=1, uniform="cols")
-
-        self._fill_row(row_frame, new_row_data, row_bg)
-
-        sep = tk.Frame(row_frame, bg=self.separator_color, height=1)
-        sep.place(relx=0, rely=1.0, anchor='sw', relwidth=1.0)
-        sep.lift()
-
-        base_y = index * self.row_height_px
-        target_h = self.row_height_px
-        steps = 8
-        step_ms = 18
-
-        def step(i=0):
-            if not row_frame.winfo_exists():
-                return
-            if i > steps:
-                try:
-                    row_frame.place_configure(y=base_y, height=target_h)
-                except Exception:
-                    pass
-                return
-            progress = i / steps
-            eased = progress ** 2
-            cur_h = target_h * eased
-            cur_y = base_y + (target_h - cur_h) / 2
-            try:
-                row_frame.place_configure(y=cur_y, height=cur_h)
-            except Exception:
-                pass
-            job = self.root.after(step_ms, lambda: step(i + 1))
-            self.flip_jobs.append(job)
-
-        step(0)
+        self.root.after(60, apply)
 
     def _animate_page_change(self, new_rows_data):
         if self.is_animating:
@@ -640,24 +504,52 @@ class App:
         old_count = len(self.table_rows)
         new_count = len(new_rows_data)
 
+        # ШАГ 1: приводим количество строк к нужному (мгновенно)
+        if old_count > new_count:
+            for i in range(new_count, old_count):
+                if i < len(self.table_rows):
+                    rf = self.table_rows[i]
+                    if rf.winfo_exists():
+                        rf.destroy()
+            self.table_rows = self.table_rows[:new_count]
+
+        while len(self.table_rows) < new_count:
+            i = len(self.table_rows)
+            row_bg = self._row_bg(i)
+            row_frame = tk.Frame(self.rows_container, bg=row_bg)
+            row_frame.place(x=0, y=i * self.row_height_px,
+                            relwidth=1.0, height=self.row_height_px)
+            row_frame.pack_propagate(False)
+            row_frame.grid_rowconfigure(0, weight=1)
+            for c in range(6):
+                row_frame.grid_columnconfigure(c, weight=1, uniform="cols")
+
+            self._fill_row(row_frame, new_rows_data[i], row_bg)
+
+            sep = tk.Frame(row_frame, bg=self.separator_color, height=1)
+            sep.place(relx=0, rely=1.0, anchor='sw', relwidth=1.0)
+            sep.lift()
+
+            self.table_rows.append(row_frame)
+
+        try:
+            self.rows_container.configure(height=new_count * self.row_height_px)
+        except Exception:
+            pass
+
+        # ШАГ 2: единая волна сверху вниз
         delay = 0
-        delay_step = 35
-        common = min(old_count, new_count)
+        delay_step = 45
 
-        for i in range(common):
-            self.root.after(delay, lambda idx=i, data=new_rows_data[i]: self._flip_single_row(idx, data))
-            delay += delay_step
-
-        for i in range(old_count, new_count):
-            self.root.after(delay, lambda idx=i, data=new_rows_data[i]: self._appear_row(idx, data))
-            delay += delay_step
-
-        for i in range(new_count, old_count):
-            self.root.after(delay, lambda idx=i: self._collapse_row(idx))
+        for i in range(new_count):
+            self.root.after(
+                delay,
+                lambda idx=i, data=new_rows_data[i]: self._soft_flash_row(idx, data)
+            )
             delay += delay_step
 
         self.current_page_data = new_rows_data
-        total_ms = delay + 300
+        total_ms = delay + 200
         self.root.after(total_ms, self._on_flip_finished)
 
     def _on_flip_finished(self):
@@ -1202,21 +1094,13 @@ class App:
 
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения (проверьте подключение к серверу)")
-            self.create_navigation_buttons(
-                self._get_nav_trio('main') + [
-                    ("ВЫХОД", self.root.quit, {'side': 'right'}),
-                ]
-            )
+            self.create_navigation_buttons(self._get_nav_trio('main'))
             return
 
         current_day = self.day_today
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
-            self.create_navigation_buttons(
-                self._get_nav_trio('main') + [
-                    ("ВЫХОД", self.root.quit, {'side': 'right'}),
-                ]
-            )
+            self.create_navigation_buttons(self._get_nav_trio('main'))
             return
 
         day_schedule = self.rasp_wth_changes[current_day]
@@ -1295,7 +1179,6 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('main')
-        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         self.start_auto_flip()
@@ -1315,7 +1198,6 @@ class App:
                 ("SEP", None),
             ]
             buttons += self._get_nav_trio('class')
-            buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
             self.create_navigation_buttons(buttons)
             return
         rasp = self.rasp_wth_changes[self.day_today]
@@ -1411,7 +1293,6 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('class')
-        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         for i in range(len(headers)):
@@ -1428,7 +1309,6 @@ class App:
         main_frame = tk.Frame(self.root, bg=self.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 15))
 
-        # --- Левая панель: параллели ---
         left_panel = tk.Frame(main_frame, bg=self.bg_panel, width=340)
         left_panel.pack(side=tk.LEFT, fill=tk.Y)
         left_panel.pack_propagate(False)
@@ -1442,7 +1322,6 @@ class App:
 
         tk.Frame(main_frame, bg=self.separator_color, width=1).pack(side=tk.LEFT, fill=tk.Y)
 
-        # --- Правая панель со скроллом ---
         right_container = tk.Frame(main_frame, bg=self.bg_color)
         right_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -1458,7 +1337,6 @@ class App:
         self.right_canvas.bind("<Configure>",
                                lambda e: self.right_canvas.itemconfig(rw, width=e.width))
 
-        # прокрутка колёсиком внутри правой панели
         def _on_wheel(e):
             if not self.right_canvas.winfo_exists():
                 return
@@ -1484,12 +1362,7 @@ class App:
             self.on_grade_selected(self.class_groups[0])
 
         self.create_footer(f"Всего доступных классов: {len(self.all_classes)}")
-        buttons = [
-            ("ОБНОВИТЬ", self.refresh_current),
-            ("SEP", None),
-        ]
-        buttons += self._get_nav_trio('selection')
-        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
+        buttons = self._get_nav_trio('selection')
         self.create_navigation_buttons(buttons)
         self.reset_idle_timer()
 
@@ -1636,10 +1509,7 @@ class App:
 
         if not self.class_groups:
             self.create_status_bar("Нет данных для отображения")
-            buttons = self._get_nav_trio('full') + [
-                ("ВЫХОД", self.root.quit, {'side': 'right'}),
-            ]
-            self.create_navigation_buttons(buttons)
+            self.create_navigation_buttons(self._get_nav_trio('full'))
             return
 
         if self.current_group_index >= len(self.class_groups):
@@ -1647,10 +1517,7 @@ class App:
 
         if not self.rasp_wth_changes:
             self.create_status_bar("Нет данных для отображения")
-            buttons = self._get_nav_trio('full') + [
-                ("ВЫХОД", self.root.quit, {'side': 'right'}),
-            ]
-            self.create_navigation_buttons(buttons)
+            self.create_navigation_buttons(self._get_nav_trio('full'))
             return
 
         current_group = self.class_groups[self.current_group_index]
@@ -1658,10 +1525,7 @@ class App:
 
         if current_day not in self.rasp_wth_changes:
             self.create_status_bar(f"Нет расписания на {current_day}")
-            buttons = self._get_nav_trio('full') + [
-                ("ВЫХОД", self.root.quit, {'side': 'right'}),
-            ]
-            self.create_navigation_buttons(buttons)
+            self.create_navigation_buttons(self._get_nav_trio('full'))
             return
 
         day_schedule = self.rasp_wth_changes[current_day]
@@ -1677,13 +1541,9 @@ class App:
 
         if max_lessons == 0:
             self.create_status_bar("Нет уроков для отображения")
-            buttons = self._get_nav_trio('full') + [
-                ("ВЫХОД", self.root.quit, {'side': 'right'}),
-            ]
-            self.create_navigation_buttons(buttons)
+            self.create_navigation_buttons(self._get_nav_trio('full'))
             return
 
-        # === ПАГИНАЦИЯ ПО КЛАССАМ ===
         all_classes_in_table = [c for c in current_group['classes'] if c in day_schedule]
         total_classes = len(all_classes_in_table)
         total_pages = max(1, (total_classes + self.full_classes_per_page - 1) // self.full_classes_per_page)
@@ -1783,7 +1643,6 @@ class App:
             ("SEP", None),
         ]
         buttons += self._get_nav_trio('full')
-        buttons.append(("ВЫХОД", self.root.quit, {'side': 'right'}))
         self.create_navigation_buttons(buttons)
 
         self.reset_idle_timer()
@@ -1822,7 +1681,6 @@ class App:
         self.reset_idle_timer()
 
     def reset_idle_timer(self, event=None):
-        # Автообновление не должно сбрасывать idle-таймер
         if getattr(self, '_suppress_idle_reset', False):
             return
         if self.idle_timer_id:
