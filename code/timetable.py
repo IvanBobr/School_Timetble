@@ -18,6 +18,7 @@ class App:
         self._last_lesson_index = None
         self._last_next_index = None
         self._current_screen = 'main'
+        self._suppress_idle_reset = False
 
         # === ПАЛИТРА ===
         self.bg_color        = '#0A0E1A'
@@ -70,6 +71,10 @@ class App:
         # Пагинация экрана "Всё расписание"
         self.current_full_page = 0
         self.full_classes_per_page = 6
+
+        # Автообновление данных с сервера
+        self.data_refresh_job = None
+        self.data_refresh_interval = 30000   # 5 минут. Поставь 600000 = 10 мин, 3600000 = 1 час
 
         # Анимация flip
         self.flip_jobs = []
@@ -134,6 +139,7 @@ class App:
 
         self.setup_window()
         self.setup_idle_timer()
+        self.start_data_refresh()
         self.show_all_classes_schedule()
         self.root.mainloop()
 
@@ -164,6 +170,67 @@ class App:
         if "физ" in subj_lower and room_is_empty:
             return "зал"
         return room_str
+
+    # ---------- АВТООБНОВЛЕНИЕ ДАННЫХ ----------
+    def start_data_refresh(self):
+        self.stop_data_refresh()
+        self.data_refresh_job = self.root.after(self.data_refresh_interval, self._do_data_refresh)
+
+    def stop_data_refresh(self):
+        if self.data_refresh_job:
+            try:
+                self.root.after_cancel(self.data_refresh_job)
+            except Exception:
+                pass
+            self.data_refresh_job = None
+
+    def _do_data_refresh(self):
+        self.data_refresh_job = None
+
+        # Если идёт анимация — подождём и попробуем снова
+        if self.is_animating:
+            self.data_refresh_job = self.root.after(2000, self._do_data_refresh)
+            return
+
+        try:
+            # снимок состояния до обновления
+            old_rasp = self.rasp_wth_changes
+            old_classes = list(self.all_classes)
+
+            ok = self._fetch_and_apply()
+
+            changed = ok and (old_rasp != self.rasp_wth_changes or old_classes != self.all_classes)
+
+            if changed:
+                print("[Auto-refresh] Данные изменились — перерисовываем текущий экран")
+                # запрещаем перерисовке сбрасывать idle-таймер, чтобы не мешать автовозврату
+                self._suppress_idle_reset = True
+                try:
+                    self._redraw_current()
+                finally:
+                    self._suppress_idle_reset = False
+            elif ok:
+                print("[Auto-refresh] Данные не изменились")
+            else:
+                print("[Auto-refresh] Сервер недоступен — экран без изменений")
+        except Exception as e:
+            print(f"[Auto-refresh] Ошибка: {e}")
+
+        # планируем следующее обновление
+        self.data_refresh_job = self.root.after(self.data_refresh_interval, self._do_data_refresh)
+
+    def _redraw_current(self):
+        """Перерисовывает текущий экран без изменения контекста (страницы, параллели, класса)."""
+        screen = getattr(self, '_current_screen', 'main')
+        if screen == 'main':
+            self.show_all_classes_schedule()
+        elif screen == 'full':
+            self.show_full_schedule()
+        elif screen == 'selection':
+            self.show_class_selection()
+        elif screen == 'class':
+            if self.current_class:
+                self.show_class_schedule(self.current_class)
 
     # ---------- БЕГУЩАЯ СТРОКА ----------
     def _make_cell(self, parent, text, bg, fg, font_, marquee=True,
@@ -248,10 +315,21 @@ class App:
                 lbl.place(x=state["x"], y=0, relheight=1.0)
                 _step()
 
+        def _restart_marquee():
+            _cancel()
+            state["phase"] = "idle"
+            state["x"] = pad_x // 2
+            state["dir"] = -1
+            state["pause"] = 0
+            lbl.place_forget()
+            lbl.place(relx=0.5, rely=0.5, anchor="center")
+            container.after_idle(_check)
+
         if marquee:
             container.bind("<Configure>", _check)
 
         container._marquee_stop = _cancel
+        container._marquee_restart = _restart_marquee
         return container
 
     # ---------- КЛИКАБЕЛЬНАЯ ЯЧЕЙКА КЛАССА ----------
@@ -351,6 +429,37 @@ class App:
         sep.lift()
         return row_frame
 
+    def _update_row_in_place(self, row_frame, row_data, index):
+        row_bg = self._row_bg(index)
+        row_frame.configure(bg=row_bg)
+
+        prepared = self._prepare_cells(row_data, row_bg)
+
+        real_cells = []
+        for w in row_frame.winfo_children():
+            if isinstance(w, tk.Frame) and int(w.cget('height')) == 1:
+                continue
+            real_cells.append(w)
+
+        for i, (text, bg, fg) in enumerate(prepared):
+            if i >= len(real_cells):
+                break
+            w = real_cells[i]
+
+            if isinstance(w, tk.Label):
+                w.configure(text=text, fg=fg, bg=bg)
+            elif isinstance(w, tk.Frame):
+                w.configure(bg=bg)
+                inner = [c for c in w.winfo_children() if isinstance(c, tk.Label)]
+                if inner:
+                    lbl = inner[0]
+                    lbl.configure(text=text, fg=fg, bg=bg)
+                    if hasattr(w, '_marquee_restart'):
+                        try:
+                            w._marquee_restart()
+                        except Exception:
+                            pass
+
     def _replace_row_content(self, row_frame, row_data, index):
         for w in row_frame.winfo_children():
             w.destroy()
@@ -388,7 +497,7 @@ class App:
         base_y = index * self.row_height_px
         base_h = self.row_height_px
         mid_h = 3
-        half_duration = 110
+        half_duration = 120
         steps = 8
         step_ms = max(8, half_duration // steps)
 
@@ -398,7 +507,7 @@ class App:
                     on_done()
                 return
             if step > steps:
-                self._replace_row_content(row_frame, new_row_data, index)
+                self._update_row_in_place(row_frame, new_row_data, index)
                 second_half(0)
                 return
             progress = step / steps
@@ -532,7 +641,7 @@ class App:
         new_count = len(new_rows_data)
 
         delay = 0
-        delay_step = 45
+        delay_step = 35
         common = min(old_count, new_count)
 
         for i in range(common):
@@ -548,7 +657,7 @@ class App:
             delay += delay_step
 
         self.current_page_data = new_rows_data
-        total_ms = delay + 350
+        total_ms = delay + 300
         self.root.after(total_ms, self._on_flip_finished)
 
     def _on_flip_finished(self):
@@ -879,16 +988,7 @@ class App:
 
     def refresh_current(self):
         self._fetch_and_apply()
-        screen = getattr(self, '_current_screen', 'main')
-        if screen == 'main':
-            self.show_all_classes_schedule()
-        elif screen == 'full':
-            self.show_full_schedule()
-        elif screen == 'selection':
-            self.show_class_selection()
-        elif screen == 'class':
-            if self.current_class:
-                self.show_class_schedule(self.current_class)
+        self._redraw_current()
 
     # ---------- ШАПКА / ПАНЕЛИ / КНОПКИ ----------
     def create_header(self, title):
@@ -1722,6 +1822,9 @@ class App:
         self.reset_idle_timer()
 
     def reset_idle_timer(self, event=None):
+        # Автообновление не должно сбрасывать idle-таймер
+        if getattr(self, '_suppress_idle_reset', False):
+            return
         if self.idle_timer_id:
             self.root.after_cancel(self.idle_timer_id)
             self.idle_timer_id = None
