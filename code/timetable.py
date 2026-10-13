@@ -1,6 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, font
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
+import socket
+import struct
+import threading
 import re
 import download_fromServer
 from json import loads
@@ -19,6 +22,10 @@ class App:
         self._last_next_index = None
         self._current_screen = 'main'
         self._suppress_idle_reset = False
+
+        # === NTP ===
+        self.time_offset = timedelta(0)
+        self.ntp_sync_job = None
 
         # === ПАЛИТРА ===
         self.bg_color        = '#0A0E1A'
@@ -141,6 +148,7 @@ class App:
         self.setup_window()
         self.setup_idle_timer()
         self.start_data_refresh()
+        self.start_ntp_sync()
         self.show_all_classes_schedule()
         self.root.mainloop()
 
@@ -148,7 +156,7 @@ class App:
     def get_time_now(self):
         if self.debug_time:
             return self.debug_time
-        return datetime.now()
+        return datetime.now() + self.time_offset
 
     def start_auto_flip(self):
         self.stop_auto_flip()
@@ -158,7 +166,10 @@ class App:
 
     def stop_auto_flip(self):
         if self.auto_flip_job:
-            self.root.after_cancel(self.auto_flip_job)
+            try:
+                self.root.after_cancel(self.auto_flip_job)
+            except Exception:
+                pass
             self.auto_flip_job = None
 
     def _row_bg(self, index):
@@ -171,6 +182,34 @@ class App:
         if "физ" in subj_lower and room_is_empty:
             return "зал"
         return room_str
+
+    # ---------- NTP-СИНХРОНИЗАЦИЯ ----------
+    def start_ntp_sync(self):
+        self.root.after(500, self._sync_ntp)
+
+    def _sync_ntp(self):
+        def _worker():
+            try:
+                client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                client.settimeout(3)
+                data = b'\x1b' + 47 * b'\0'
+                client.sendto(data, ('pool.ntp.org', 123))
+                resp, _ = client.recvfrom(1024)
+                client.close()
+                if resp:
+                    t = struct.unpack('!12I', resp)[10]
+                    t -= 2208988800
+                    ntp_utc = datetime.fromtimestamp(t, tz=timezone.utc)
+                    local_utc = datetime.now(timezone.utc)
+                    self.time_offset = ntp_utc - local_utc
+                    print(f"[NTP] Синхронизировано с pool.ntp.org: "
+                          f"offset = {self.time_offset.total_seconds():+.2f} сек")
+            except Exception as e:
+                print(f"[NTP] Не удалось синхронизироваться: {e} "
+                      f"(используем системное время)")
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self.ntp_sync_job = self.root.after(6 * 3600 * 1000, self._sync_ntp)
 
     # ---------- АВТООБНОВЛЕНИЕ ДАННЫХ ----------
     def start_data_refresh(self):
@@ -347,7 +386,7 @@ class App:
         lbl.bind('<Leave>', _leave)
         return lbl
 
-    # ---------- СТАНДАРТНАЯ ТРОЙКА НАВИГАЦИИ ----------
+    # ---------- ТРОЙКА НАВИГАЦИИ ----------
     def _get_nav_trio(self, active_screen):
         return [
             ("ТЕКУЩИЕ УРОКИ",
@@ -504,7 +543,6 @@ class App:
         old_count = len(self.table_rows)
         new_count = len(new_rows_data)
 
-        # ШАГ 1: приводим количество строк к нужному (мгновенно)
         if old_count > new_count:
             for i in range(new_count, old_count):
                 if i < len(self.table_rows):
@@ -537,7 +575,6 @@ class App:
         except Exception:
             pass
 
-        # ШАГ 2: единая волна сверху вниз
         delay = 0
         delay_step = 45
 
@@ -822,7 +859,10 @@ class App:
         self.root.unbind_all("<Button-4>")
         self.root.unbind_all("<Button-5>")
         if hasattr(self, 'clock_job') and self.clock_job:
-            self.root.after_cancel(self.clock_job)
+            try:
+                self.root.after_cancel(self.clock_job)
+            except Exception:
+                pass
             self.clock_job = None
         for widget in self.root.winfo_children():
             widget.destroy()
@@ -1684,7 +1724,10 @@ class App:
         if getattr(self, '_suppress_idle_reset', False):
             return
         if self.idle_timer_id:
-            self.root.after_cancel(self.idle_timer_id)
+            try:
+                self.root.after_cancel(self.idle_timer_id)
+            except Exception:
+                pass
             self.idle_timer_id = None
         self.idle_timer_id = self.root.after(30000, self.on_idle_timeout)
 
